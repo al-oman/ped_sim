@@ -1,0 +1,152 @@
+"""Conditional flow matching model that generates short robot trajectories.
+
+A trajectory is a (2, TRAJ_LEN) array: x/y are channels, time runs along the
+length. The model is a small 1D UNet conditioned on the flow time t and on
+the current observation (robot position + pedestrian states).
+
+Flow matching in one paragraph: pick noise z ~ N(0,1) and a real trajectory
+x1, blend them as x_t = (1-t) z + t x1, and train the network v(x_t, t, cond)
+to predict x1 - z — the straight-line velocity pointing from the noise to the
+data. To generate, start at noise (t=0) and integrate v to t=1.
+"""
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+TRAJ_LEN = 16  # generated trajectory length, steps
+
+
+def condition(obs):
+    """Flat conditioning vector: robot position + pedestrians relative to it."""
+    peds = obs["peds"].copy()
+    peds[:, :2] -= obs["robot"]
+    return np.concatenate([obs["robot"], peds.ravel()])
+
+
+def time_features(t):
+    """Sinusoidal features of the flow time, so the net can resolve t sharply."""
+    freqs = 2 ** torch.arange(8, device=t.device) * torch.pi
+    return torch.cat([torch.sin(t * freqs), torch.cos(t * freqs)], dim=1)
+
+
+class Block(nn.Module):
+    """Two convs, with the (t, condition) embedding added in between."""
+
+    def __init__(self, c_in, c_out, emb_dim):
+        super().__init__()
+        self.conv1 = nn.Conv1d(c_in, c_out, 3, padding=1)
+        self.conv2 = nn.Conv1d(c_out, c_out, 3, padding=1)
+        self.norm1 = nn.GroupNorm(4, c_out)
+        self.norm2 = nn.GroupNorm(4, c_out)
+        self.emb = nn.Linear(emb_dim, c_out)
+
+    def forward(self, x, emb):
+        h = F.silu(self.norm1(self.conv1(x)))
+        h = h + self.emb(emb)[:, :, None]  # broadcast over the time axis
+        return F.silu(self.norm2(self.conv2(h)))
+
+
+class UNet1D(nn.Module):
+    def __init__(self, cond_dim, ch=64, emb_dim=128):
+        super().__init__()
+        self.embed = nn.Sequential(nn.Linear(cond_dim + 16, emb_dim), nn.SiLU(),
+                                   nn.Linear(emb_dim, emb_dim))
+        self.enc1 = Block(2, ch, emb_dim)             # length 16
+        self.enc2 = Block(ch, 2 * ch, emb_dim)        # length 8
+        self.enc3 = Block(2 * ch, 4 * ch, emb_dim)    # length 4
+        self.mid = Block(4 * ch, 4 * ch, emb_dim)     # length 2
+        self.dec3 = Block(8 * ch, 2 * ch, emb_dim)    # length 4, sees enc3's output
+        self.dec2 = Block(4 * ch, ch, emb_dim)        # length 8, sees enc2's output
+        self.dec1 = Block(2 * ch, ch, emb_dim)        # length 16, sees enc1's output
+        self.out = nn.Conv1d(ch, 2, 1)
+
+    def forward(self, x, t, cond):
+        emb = self.embed(torch.cat([time_features(t), cond], dim=1))
+        h1 = self.enc1(x, emb)
+        h2 = self.enc2(F.avg_pool1d(h1, 2), emb)
+        h3 = self.enc3(F.avg_pool1d(h2, 2), emb)
+        m = self.mid(F.avg_pool1d(h3, 2), emb)
+        d3 = self.dec3(torch.cat([F.interpolate(m, scale_factor=2), h3], dim=1), emb)
+        d2 = self.dec2(torch.cat([F.interpolate(d3, scale_factor=2), h2], dim=1), emb)
+        d1 = self.dec1(torch.cat([F.interpolate(d2, scale_factor=2), h1], dim=1), emb)
+        return self.out(d1)
+
+
+def flow_loss(model, traj, cond):
+    z = torch.randn_like(traj)
+    t = torch.rand(len(traj), 1, device=traj.device)
+    x_t = (1 - t[:, :, None]) * z + t[:, :, None] * traj
+    return F.mse_loss(model(x_t, t, cond), traj - z)
+
+
+def _cbf(x, v, centers, radii, kappa, K):
+    """CBF-style brake, applied to the velocity field: cap each waypoint's
+    speed toward each disk the closer it gets (inside a disk, push outward).
+    Edits v in place. x, v are (B, 2, L); disk (k, n) constrains waypoint k."""
+    xw, vw = x.transpose(1, 2), v.transpose(1, 2)  # (B, L, 2) views
+    for n in range(centers.shape[1]):
+        d = xw[:, :K] - centers[:K, n]
+        dist = d.norm(dim=2, keepdim=True).clamp(min=1e-6)
+        h = dist - radii[:K, n, None]                   # signed distance to disk n
+        toward = (vw[:, :K] * (d / dist)).sum(2, keepdim=True)
+        fix = (-kappa * h - toward).clamp(min=0)        # extra outward speed needed
+        vw[:, :K] += fix * d / dist
+
+
+def _project(x, centers, radii, scale, K):
+    """Push any waypoint inside a disk (scaled by `scale`) to its boundary."""
+    xw = x.transpose(1, 2)
+    for n in range(centers.shape[1]):
+        d = xw[:, :K] - centers[:K, n]
+        dist = d.norm(dim=2, keepdim=True).clamp(min=1e-6)
+        r = scale * radii[:K, n, None]
+        xw[:, :K] = torch.where(dist < r, centers[:K, n] + d / dist * r, xw[:, :K])
+
+
+@torch.no_grad()
+def sample(model, cond, disks=None, steps=10, kappa=8.0, hard=None, init=None, tau=0.0):
+    """Euler-integrate the learned velocity field from noise to trajectories.
+
+    disks: optional keep-out regions as (centers, radii), centers (K, N, 2)
+    and radii (K, N), in the model's normalized robot-relative coordinates —
+    waypoint k must end up outside disk (k, n). Enforced two ways: a CBF
+    brake on the velocity while integrating (gentle, lets the model's own
+    field route around the disks), and a projection whose disks anneal from
+    zero to full size — the final full-size passes make every returned
+    trajectory satisfy the constraints by construction. A disk with negative
+    radius never binds (callers use -1 to disable one).
+
+    hard: only constrain the first `hard` waypoints (default: all). In
+    receding-horizon use only the executed prefix of the plan needs a
+    certificate; constraining far waypoints against their huge uncertainty
+    disks strangles the plan for no safety benefit.
+
+    init/tau: warm start (Janner et al. 2022). Begin integration at flow time
+    tau from the blend (1-tau)*noise + tau*init, where init is a previous
+    plan in normalized coordinates. tau=0 is a cold start from pure noise;
+    higher tau keeps the result closer to init — the consistency/reactivity
+    knob for receding-horizon replanning. Also cheaper: only the remaining
+    (1-tau) of the schedule is integrated."""
+    x = torch.randn(len(cond), 2, TRAJ_LEN, device=cond.device)
+    first = 0
+    if init is not None and tau > 0:
+        x = (1 - tau) * x + tau * init
+        first = min(int(tau * steps), steps - 1)
+    if disks is not None:
+        centers = torch.as_tensor(disks[0], dtype=torch.float32, device=cond.device)
+        radii = torch.as_tensor(disks[1], dtype=torch.float32, device=cond.device)
+        K = min(len(centers), TRAJ_LEN, hard or TRAJ_LEN)
+    for i in range(first, steps):
+        t = torch.full((len(cond), 1), i / steps, device=cond.device)
+        v = model(x, t, cond)
+        if disks is not None:
+            _cbf(x, v, centers, radii, kappa, K)
+        x = x + v / steps
+        if disks is not None:
+            _project(x, centers, radii, (i + 1) / steps, K)
+    if disks is not None:
+        for _ in range(30):  # settle: leaving one disk can push a waypoint into another
+            _project(x, centers, radii, 1.0, K)
+    return x
