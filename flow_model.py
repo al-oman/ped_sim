@@ -74,6 +74,65 @@ class UNet1D(nn.Module):
         return self.out(d1)
 
 
+class ResidualTemporalBlock(nn.Module):
+    """Diffuser's building block: two kernel-5 convs (GroupNorm + Mish) with
+    the (t, condition) embedding added in between, and a residual connection."""
+
+    def __init__(self, c_in, c_out, emb_dim):
+        super().__init__()
+        self.conv1 = nn.Sequential(nn.Conv1d(c_in, c_out, 5, padding=2),
+                                   nn.GroupNorm(8, c_out), nn.Mish())
+        self.conv2 = nn.Sequential(nn.Conv1d(c_out, c_out, 5, padding=2),
+                                   nn.GroupNorm(8, c_out), nn.Mish())
+        self.emb = nn.Sequential(nn.Mish(), nn.Linear(emb_dim, c_out))
+        self.skip = nn.Conv1d(c_in, c_out, 1) if c_in != c_out else nn.Identity()
+
+    def forward(self, x, emb):
+        h = self.conv1(x) + self.emb(emb)[:, :, None]
+        return self.conv2(h) + self.skip(x)
+
+
+class TemporalUnet(nn.Module):
+    """The Diffuser backbone (Janner et al. 2022), as inherited by SafeDiffuser
+    and SafeFlowMatcher: base dim 32, channel multipliers (1, 2, 4, 8),
+    kernel-5 residual temporal blocks, Mish activations (~4M parameters).
+    Same interface as UNet1D; the observation is folded into the flow-time
+    embedding, as in the smaller model."""
+
+    def __init__(self, cond_dim, dim=32, mults=(1, 2, 4, 8), emb_dim=128):
+        super().__init__()
+        self.embed = nn.Sequential(nn.Linear(cond_dim + 16, emb_dim), nn.Mish(),
+                                   nn.Linear(emb_dim, emb_dim))
+        dims = [2] + [dim * m for m in mults]  # [2, 32, 64, 128, 256]
+        self.downs = nn.ModuleList()           # length 16 -> 8 -> 4 -> 2
+        for i in range(len(mults)):
+            self.downs.append(nn.ModuleList([
+                ResidualTemporalBlock(dims[i], dims[i + 1], emb_dim),
+                ResidualTemporalBlock(dims[i + 1], dims[i + 1], emb_dim)]))
+        self.mid1 = ResidualTemporalBlock(dims[-1], dims[-1], emb_dim)
+        self.mid2 = ResidualTemporalBlock(dims[-1], dims[-1], emb_dim)
+        self.ups = nn.ModuleList()              # length 2 -> 4 -> 8 -> 16
+        for i in reversed(range(len(mults) - 1)):
+            self.ups.append(nn.ModuleList([
+                ResidualTemporalBlock(dims[i + 2] + dims[i + 1], dims[i + 1], emb_dim),
+                ResidualTemporalBlock(dims[i + 1], dims[i + 1], emb_dim)]))
+        self.out = nn.Conv1d(dims[1], 2, 1)
+
+    def forward(self, x, t, cond):
+        emb = self.embed(torch.cat([time_features(t), cond], dim=1))
+        skips = []
+        for i, (block1, block2) in enumerate(self.downs):
+            x = block2(block1(x, emb), emb)
+            if i < len(self.downs) - 1:
+                skips.append(x)
+                x = F.avg_pool1d(x, 2)
+        x = self.mid2(self.mid1(x, emb), emb)
+        for block1, block2 in self.ups:
+            x = torch.cat([F.interpolate(x, scale_factor=2), skips.pop()], dim=1)
+            x = block2(block1(x, emb), emb)
+        return self.out(x)
+
+
 def flow_loss(model, traj, cond):
     z = torch.randn_like(traj)
     t = torch.rand(len(traj), 1, device=traj.device)

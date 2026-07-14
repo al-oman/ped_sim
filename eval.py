@@ -24,7 +24,10 @@ NEAR = 0.6  # near-miss distance between centers, m (collision is < 0.5)
 def run(policy, seed, predictor=None, aci=None):
     env = Env(seed=seed)
     obs, done, steps, collisions = env.reset(), False, 0, 0
+    if aci is not None:
+        aci.past = []  # pending predictions don't survive a world reset
     miss, miss_n = 0.0, 0
+    tube_miss, tube_n, pending = 0.0, 0, []
     path, dists = [obs["robot"]], []
     while not done and steps < MAX_STEPS:
         disks = None
@@ -37,6 +40,16 @@ def run(policy, seed, predictor=None, aci=None):
             missed = aci.update(pred, obs["peds"][:, :2])
             miss += missed[:getattr(policy, "replan_every", len(missed))].mean()
             miss_n += 1
+            # Tube-level bookkeeping: collect each prediction's per-lookahead
+            # misses until all HORIZON of them have resolved; a tube fails if
+            # ANY lookahead missed. This is the alpha-level event the safety
+            # guarantee is stated on, for any calibrator.
+            pending.insert(0, np.zeros((HORIZON, missed.shape[1]), bool))
+            for j in range(len(missed)):
+                pending[j][j] = missed[j]
+            if len(pending) == HORIZON:  # oldest prediction fully checked
+                tube_miss += pending.pop().any(axis=0).mean()
+                tube_n += 1
         collisions += reward < 0
         path.append(obs["robot"])
         dists.append(np.linalg.norm(obs["peds"][:, :2] - obs["robot"], axis=1).min())
@@ -53,6 +66,7 @@ def run(policy, seed, predictor=None, aci=None):
             "steps": steps,
             "collisions": collisions,
             "coverage": 1 - miss / miss_n if miss_n else float("nan"),
+            "tube": 1 - tube_miss / tube_n if tube_n else float("nan"),
             "closest": dists.min(),
             "near": (dists < NEAR).mean(),
             "path": np.linalg.norm(np.diff(path, axis=0), axis=1).sum(),
@@ -79,6 +93,7 @@ if __name__ == "__main__":
         print(f"{name:12s}: success {mean('success'):.0%}, steps {mean('steps', ok):.0f}, "
               f"path {mean('path', ok):.1f} m, collision steps {mean('collisions'):.1f}, "
               f"closest {mean('closest'):.2f} m, near(<{NEAR}m) {mean('near'):.1%}")
-        cov = f", coverage {mean('coverage'):.3f}" if constrained else ""
+        cov = (f", coverage {mean('coverage'):.3f}, tube {mean('tube'):.3f}"
+               if constrained else "")
         print(f"{'':12s}  heading {mean('heading'):.1f} deg/step, "
               f"accel {mean('accel'):.2f} m/s^2, jerk {mean('jerk'):.0f} m/s^3{cov}")

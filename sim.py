@@ -26,7 +26,7 @@ done when the robot reaches the right edge.
 import numpy as np
 import pygame
 
-from aci import ACI
+from aci import MaxACI, ACI
 from pedestrians import Crowd
 from policies import FlowPolicy, OrcaExpert, WalkForward
 from predictor import ConstantVelocity
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     # policy = OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT, radius=0.25, walls=WALLS)
     # policy = WalkForward()
     predictor = ConstantVelocity(DT, HORIZON)
-    aci = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)
+    aci = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)  # swap in ACI(...) for the union-bound method
 
     obs = env.reset()
     done = False
@@ -147,5 +147,5 @@ if __name__ == "__main__":
                    certified=getattr(policy, "replan_every", 0))
     radii = aci.radii()
     print(f"total reward {total_reward}, k=1 coverage {1 - misses / steps:.3f} "
-          f"(per-disk target {1 - aci.target:.3f}, tube target {1 - aci.alpha}), "
+          f"(tube target {1 - aci.alpha}), "
           f"mean radii k=1 {radii[0].mean():.3f} m ... k={HORIZON} {radii[-1].mean():.3f} m")

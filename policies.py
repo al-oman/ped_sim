@@ -38,12 +38,15 @@ class FlowPolicy:
     def __init__(self, path="flow.pt", dt=0.1, replan_every=4, margin=0.5,
                  n_samples=4, tau=0.6, stale=0.5, device=None):
         import torch
-        from flow_model import UNet1D
+        from flow_model import TemporalUnet, UNet1D
         ckpt = torch.load(path, weights_only=False)
-        # Default to CPU: this UNet is small enough that MPS dispatch overhead
-        # makes it ~4x slower there (measured). Pass device="mps" if it grows.
+        # Default to CPU: these UNets are small enough that MPS dispatch
+        # overhead makes them slower there (measured). Pass device="mps" if
+        # the model grows.
         self.device = device or "cpu"
-        self.model = UNet1D(ckpt["cond_dim"])
+        # Old checkpoints (no "arch" key) are the original small UNet1D.
+        cls = TemporalUnet if ckpt.get("arch") == "temporal" else UNet1D
+        self.model = cls(ckpt["cond_dim"])
         self.model.load_state_dict(ckpt["model"])
         self.model.eval()
         self.model.to(self.device)

@@ -58,6 +58,7 @@ def episode(seed, policy, predictor, calib, shift):
     (k <= replan_every) disks and of all disks, and whether the robot made it."""
     env = Env(seed=seed)
     obs, done, steps = env.reset(), False, 0
+    calib.past = []  # pending predictions don't survive a world reset
     miss_cert, miss_all = [], []
     while not done and steps < MAX_STEPS:
         if shift is not None:
@@ -109,7 +110,7 @@ if __name__ == "__main__":
     for col, cond in enumerate(CONDITIONS):
         for row, metric in enumerate(("certified disks (k <= 4)", "all disks (k = 1..16)")):
             ax = axes[row, col]
-            for name in ("split cp ", "online cp", "aci      "):
+            for name in [n for (c, n) in results if c == cond]:
                 curves = [m[row] for m in results[cond, name]]
                 if cond == "speed_mid":  # x = step within episode, mean over episodes
                     stack = np.full((len(curves), PLOT_STEPS), np.nan)
@@ -122,7 +123,8 @@ if __name__ == "__main__":
                 else:  # x = episode index
                     ax.plot([1 - m.mean() for m in curves], label=name.strip())
                     ax.axvline(SHIFT_EP - 0.5, color="gray", ls=":")
-            ax.axhline(TARGET, color="black", ls="--", lw=0.8, label="target")
+            ax.axhline(TARGET, color="black", ls="--", lw=0.8, label="per-disk target (union)")
+            ax.axhline(1 - ALPHA, color="gray", ls="--", lw=0.8, label="tube target (max)")
             if row == 0:
                 ax.set_title(cond)
             if col == 0:

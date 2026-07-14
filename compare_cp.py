@@ -14,7 +14,7 @@ guarantee needs. ACI's guarantee survives that shift by construction.
 
 import numpy as np
 
-from aci import ACI
+from aci import ACI, MaxACI
 from eval import EPISODES, MAX_STEPS, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
@@ -48,12 +48,17 @@ def warmed(pairs, gamma, window=100):
 
 
 def calibrators(pairs):
-    """The three comparison calibrators, warmed on identical data."""
+    """The comparison calibrators, warmed on identical data."""
     split = warmed(pairs, gamma=0.0, window=10 ** 6)  # split CP keeps all calibration scores
     split.freeze()
+    maxaci = MaxACI(alpha=ALPHA, gamma=0.01, horizon=HORIZON, n_peds=N_PEDS)
+    for pred, actual in pairs:
+        maxaci.update(pred, actual)
+    maxaci.sigma_frozen = True  # lock the error scales once calibration ends
     return {"split cp ": split,
             "online cp": warmed(pairs, gamma=0.0),
-            "aci      ": warmed(pairs, gamma=0.01)}
+            "aci      ": warmed(pairs, gamma=0.01),
+            "aci max  ": maxaci}
 
 
 if __name__ == "__main__":
@@ -61,12 +66,14 @@ if __name__ == "__main__":
     print(f"calibrated on {len(pairs)} steps from {len(CALIB_SEEDS)} unconstrained episodes")
     setups = calibrators(pairs)
 
-    print(f"per-disk coverage target: {1 - ALPHA / HORIZON:.4f}")
+    print(f"per-disk coverage target {1 - ALPHA / HORIZON:.4f} (union methods), "
+          f"tube coverage target {1 - ALPHA} (all methods)")
     for name, calib in setups.items():
         policy, predictor = FlowPolicy(), ConstantVelocity(DT, HORIZON)
         rows = [run(policy, seed, predictor, calib) for seed in range(1000, 1000 + EPISODES)]
         ok = [r for r in rows if r["success"]] or rows
         print(f"{name}: coverage {np.mean([r['coverage'] for r in rows]):.4f}, "
+              f"tube {np.mean([r['tube'] for r in rows]):.3f}, "
               f"success {np.mean([r['success'] for r in rows]):.0%}, "
               f"steps {np.mean([r['steps'] for r in ok]):.0f}, "
               f"collisions {np.mean([r['collisions'] for r in rows]):.2f}, "
