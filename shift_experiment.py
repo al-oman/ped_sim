@@ -19,10 +19,11 @@ Writes shift_results.csv and shift_coverage.png.
 """
 
 import csv
+import time
 
 import numpy as np
 
-from compare_cp import ALPHA, calibration_data, calibrators
+from compare_cp import ALPHA, DEVICE, calibration_data, calibrators
 from policies import FlowPolicy
 from predictor import ConstantVelocity
 from sim import DT, HORIZON, Env
@@ -79,7 +80,8 @@ if __name__ == "__main__":
     results = {}  # (condition, calibrator) -> list of (miss_cert, miss_all, success)
     for cond, shifts in CONDITIONS.items():
         for name, calib in calibrators(pairs).items():
-            policy, predictor = FlowPolicy(), ConstantVelocity(DT, HORIZON)
+            policy, predictor = FlowPolicy(device=DEVICE), ConstantVelocity(DT, HORIZON)
+            t0 = time.time()
             eps = [episode(1000 + i, policy, predictor, calib, s)
                    for i, s in enumerate(shifts)]
             results[cond, name] = eps
@@ -91,7 +93,8 @@ if __name__ == "__main__":
             print(f"{cond:13s} {name}: certified pre {stat(pre, 0):.4f} post {stat(post, 0):.4f}, "
                   f"all-k pre {stat(pre, 1):.4f} post {stat(post, 1):.4f}, "
                   f"success pre {np.mean([m[2] for m in pre]):.0%} "
-                  f"post {np.mean([m[2] for m in post]):.0%}")
+                  f"post {np.mean([m[2] for m in post]):.0%} "
+                  f"[{time.time() - t0:.0f}s]")
 
     with open("shift_results.csv", "w", newline="") as f:
         w = csv.writer(f)

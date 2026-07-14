@@ -16,7 +16,7 @@ import time
 import numpy as np
 
 from aci import ACI
-from eval import run
+from eval import DEVICE, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
 from sim import DT, HORIZON, N_PEDS
@@ -50,7 +50,7 @@ def cells():
 
 def evaluate(cfg):
     policy = FlowPolicy(replan_every=cfg["replan_every"], n_samples=cfg["n_samples"],
-                        tau=cfg["tau"], stale=cfg["stale"])
+                        tau=cfg["tau"], stale=cfg["stale"], device=DEVICE)
     predictor = ConstantVelocity(DT, HORIZON)
     aci = ACI(alpha=cfg["alpha"], gamma=cfg["gamma"], horizon=HORIZON,
               n_peds=N_PEDS, window=cfg["window"])

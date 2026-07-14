@@ -12,10 +12,12 @@ error distribution — which breaks the exchangeability that split CP's
 guarantee needs. ACI's guarantee survives that shift by construction.
 """
 
+import time
+
 import numpy as np
 
 from aci import ACI, MaxACI
-from eval import EPISODES, MAX_STEPS, run
+from eval import DEVICE, EPISODES, MAX_STEPS, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
 from sim import DT, HORIZON, N_PEDS, Env
@@ -26,7 +28,7 @@ ALPHA = 0.1
 
 def calibration_data():
     """(prediction, actual) pairs from unconstrained flow rollouts."""
-    policy, predictor = FlowPolicy(), ConstantVelocity(DT, HORIZON)
+    policy, predictor = FlowPolicy(device=DEVICE), ConstantVelocity(DT, HORIZON)
     pairs = []
     for seed in CALIB_SEEDS:
         env = Env(seed=seed)
@@ -62,14 +64,17 @@ def calibrators(pairs):
 
 
 if __name__ == "__main__":
+    t0 = time.time()
     pairs = calibration_data()
-    print(f"calibrated on {len(pairs)} steps from {len(CALIB_SEEDS)} unconstrained episodes")
+    print(f"calibrated on {len(pairs)} steps from {len(CALIB_SEEDS)} unconstrained episodes "
+          f"in {time.time() - t0:.0f}s (device: {DEVICE})")
     setups = calibrators(pairs)
 
     print(f"per-disk coverage target {1 - ALPHA / HORIZON:.4f} (union methods), "
           f"tube coverage target {1 - ALPHA} (all methods)")
     for name, calib in setups.items():
-        policy, predictor = FlowPolicy(), ConstantVelocity(DT, HORIZON)
+        policy, predictor = FlowPolicy(device=DEVICE), ConstantVelocity(DT, HORIZON)
+        t0 = time.time()
         rows = [run(policy, seed, predictor, calib) for seed in range(1000, 1000 + EPISODES)]
         ok = [r for r in rows if r["success"]] or rows
         print(f"{name}: coverage {np.mean([r['coverage'] for r in rows]):.4f}, "
@@ -77,4 +82,5 @@ if __name__ == "__main__":
               f"success {np.mean([r['success'] for r in rows]):.0%}, "
               f"steps {np.mean([r['steps'] for r in ok]):.0f}, "
               f"collisions {np.mean([r['collisions'] for r in rows]):.2f}, "
-              f"closest {np.mean([r['closest'] for r in rows]):.2f} m")
+              f"closest {np.mean([r['closest'] for r in rows]):.2f} m "
+              f"[{time.time() - t0:.0f}s]")

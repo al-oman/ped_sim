@@ -10,11 +10,12 @@ to train an alternate model off a bolder/shyer expert without overwriting.
 """
 
 import sys
+import time
 
 import numpy as np
 import torch
 
-from flow_model import TRAJ_LEN, BaselineUnet, condition, flow_loss, sample
+from flow_model import TRAJ_LEN, BaselineUnet, condition, device_arg, flow_loss, sample
 from policies import OrcaExpert
 from sim import DT, HEIGHT, WALLS, WIDTH, Env, in_wall
 
@@ -53,11 +54,13 @@ def collect(expert_radius=0.25):
 
 
 if __name__ == "__main__":
+    device = device_arg("mps" if torch.backends.mps.is_available() else "cpu")
     out = sys.argv[1] if len(sys.argv) > 1 else "flow.pt"
     expert_radius = float(sys.argv[2]) if len(sys.argv) > 2 else 0.25  # the bold expert
+    t0 = time.time()
     trajs, conds = collect(expert_radius)
     print(f"collected {len(trajs)} windows from {EPISODES} episodes "
-          f"(expert radius {expert_radius}) -> {out}")
+          f"(expert radius {expert_radius}) in {time.time() - t0:.0f}s -> {out}")
 
     # Normalize: trajectories to unit scale, conditions to zero mean / unit std.
     traj_std = trajs.std()
@@ -65,10 +68,10 @@ if __name__ == "__main__":
     trajs = torch.tensor(trajs / traj_std)
     conds = torch.tensor((conds - cond_mean) / cond_std)
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
     model = BaselineUnet(cond_dim=conds.shape[1]).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
+    t0 = time.time()
     for epoch in range(EPOCHS):
         losses = []
         for i in torch.randperm(len(trajs)).split(BATCH):
@@ -78,6 +81,8 @@ if __name__ == "__main__":
             opt.step()
             losses.append(loss.item())
         print(f"epoch {epoch + 1}/{EPOCHS}, loss {np.mean(losses):.4f}")
+    dt = time.time() - t0
+    print(f"trained {EPOCHS} epochs on {device} in {dt:.0f}s ({dt / EPOCHS:.1f} s/epoch)")
 
     torch.save({"model": model.state_dict(), "cond_dim": conds.shape[1], "arch": "baseline",
                 "traj_std": traj_std, "cond_mean": cond_mean, "cond_std": cond_std,

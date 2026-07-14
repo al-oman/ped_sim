@@ -9,15 +9,19 @@ around predicted pedestrians enforced during generation); its ACI calibrator
 persists across episodes. Seeds are outside the training range (train.py uses
 0..EPISODES) so the flow model is evaluated on crowds it has never seen."""
 
+import time
+
 import numpy as np
 
 from aci import ACI
+from flow_model import device_arg
 from policies import FlowPolicy, OrcaExpert
 from predictor import ConstantVelocity
 from sim import DT, HEIGHT, HORIZON, N_PEDS, WALLS, WIDTH, Env
 
 EPISODES = 20
 MAX_STEPS = 600
+DEVICE = device_arg()
 NEAR = 0.6  # near-miss distance between centers, m (collision is < 0.5)
 
 
@@ -76,14 +80,16 @@ def run(policy, seed, predictor=None, aci=None):
 
 
 if __name__ == "__main__":
+    print(f"flow policies on device: {DEVICE}")
     setups = {
         "orca expert": (OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT, walls=WALLS), False),
-        "flow": (FlowPolicy(), False),
-        "flow + aci": (FlowPolicy(), True),
+        "flow": (FlowPolicy(device=DEVICE), False),
+        "flow + aci": (FlowPolicy(device=DEVICE), True),
     }
     for name, (policy, constrained) in setups.items():
         predictor = ConstantVelocity(DT, HORIZON) if constrained else None
         aci = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS) if constrained else None
+        t0 = time.time()
         rows = [run(policy, seed, predictor, aci) for seed in range(1000, 1000 + EPISODES)]
         ok = [r for r in rows if r["success"]] or rows  # task metrics: successful eps only
 
@@ -96,4 +102,5 @@ if __name__ == "__main__":
         cov = (f", coverage {mean('coverage'):.3f}, tube {mean('tube'):.3f}"
                if constrained else "")
         print(f"{'':12s}  heading {mean('heading'):.1f} deg/step, "
-              f"accel {mean('accel'):.2f} m/s^2, jerk {mean('jerk'):.0f} m/s^3{cov}")
+              f"accel {mean('accel'):.2f} m/s^2, jerk {mean('jerk'):.0f} m/s^3{cov} "
+              f"[{time.time() - t0:.0f}s]")
