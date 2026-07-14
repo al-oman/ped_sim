@@ -39,7 +39,9 @@ class FlowPolicy:
                  n_samples=4, tau=0.6, stale=0.5, device=None):
         import torch
         from flow_model import BaselineUnet, TemporalUnet, UNet1D
-        ckpt = torch.load(path, weights_only=False)
+        # map_location: checkpoints may carry the training device's tags
+        # (e.g. mps from a Mac), which other machines can't materialize.
+        ckpt = torch.load(path, weights_only=False, map_location="cpu")
         # Default to CPU: these UNets are small enough that MPS dispatch
         # overhead makes them slower there (measured). Pass device="mps" if
         # the model grows.
