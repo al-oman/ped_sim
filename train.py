@@ -14,7 +14,7 @@ import sys
 import numpy as np
 import torch
 
-from flow_model import TRAJ_LEN, TemporalUnet, condition, flow_loss, sample
+from flow_model import TRAJ_LEN, BaselineUnet, condition, flow_loss, sample
 from policies import OrcaExpert
 from sim import DT, HEIGHT, WALLS, WIDTH, Env, in_wall
 
@@ -66,7 +66,7 @@ if __name__ == "__main__":
     conds = torch.tensor((conds - cond_mean) / cond_std)
 
     device = "mps" if torch.backends.mps.is_available() else "cpu"
-    model = TemporalUnet(cond_dim=conds.shape[1]).to(device)
+    model = BaselineUnet(cond_dim=conds.shape[1]).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     for epoch in range(EPOCHS):
@@ -79,7 +79,7 @@ if __name__ == "__main__":
             losses.append(loss.item())
         print(f"epoch {epoch + 1}/{EPOCHS}, loss {np.mean(losses):.4f}")
 
-    torch.save({"model": model.state_dict(), "cond_dim": conds.shape[1], "arch": "temporal",
+    torch.save({"model": model.state_dict(), "cond_dim": conds.shape[1], "arch": "baseline",
                 "traj_std": traj_std, "cond_mean": cond_mean, "cond_std": cond_std,
                 "provenance": {"expert_radius": expert_radius, "episodes": EPISODES,
                                "epochs": EPOCHS, "windows": len(trajs)}},

@@ -133,6 +133,49 @@ class TemporalUnet(nn.Module):
         return self.out(x)
 
 
+class _CondTimeMLP(nn.Module):
+    """Wraps the vendored network's time embedding so the observation vector
+    joins it — the single functional change to the baseline network, made
+    from outside the vendored code."""
+
+    def __init__(self, time_mlp, cond_dim, dim):
+        super().__init__()
+        self.time_mlp = time_mlp
+        self.cond_mlp = nn.Sequential(nn.Linear(cond_dim, dim * 4), nn.Mish(),
+                                      nn.Linear(dim * 4, dim))
+        self.cond = None
+
+    def forward(self, t):
+        return self.time_mlp(t) + self.cond_mlp(self.cond)
+
+
+class BaselineUnet(nn.Module):
+    """The exact SafeFlowMatcher / SafeDiffuser / Diffuser backbone, vendored
+    verbatim in vendor_diffuser/ (base dim 32, mults (1, 2, 4, 8), kernel-5
+    residual blocks, sinusoidal time embedding on the raw flow time — all
+    baseline behavior). Adapted only at the edges: trajectories are
+    channel-first here vs channel-last there, and the observation vector is
+    added into the time embedding (the baseline conditions by inpainting
+    states it generates; our pedestrians aren't generated, so they enter
+    through the embedding instead).
+
+    Our flow_loss/sample already match SafeFlowMatcher's generative setup
+    exactly: their cfm.py uses torchcfm's ConditionalFlowMatcher(sigma=0) —
+    x_t = (1-t) noise + t data, target = data - noise, uniform t — integrated
+    with uniform-grid Euler, with safety corrections applied to the state
+    after each step."""
+
+    def __init__(self, cond_dim, dim=32):
+        super().__init__()
+        from vendor_diffuser.temporal import TemporalUnet as DiffuserUnet
+        self.net = DiffuserUnet(horizon=TRAJ_LEN, transition_dim=2, cond_dim=0, dim=dim)
+        self.net.time_mlp = _CondTimeMLP(self.net.time_mlp, cond_dim, dim)
+
+    def forward(self, x, t, cond):
+        self.net.time_mlp.cond = cond
+        return self.net(x.transpose(1, 2), None, t[:, 0]).transpose(1, 2)
+
+
 def flow_loss(model, traj, cond):
     z = torch.randn_like(traj)
     t = torch.rand(len(traj), 1, device=traj.device)
