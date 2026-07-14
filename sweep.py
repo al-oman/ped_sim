@@ -29,7 +29,7 @@ DEFAULTS = dict(alpha=0.1, window=100, gamma=0.01, replan_every=4,
                 stale=0.5, tau=0.6, n_samples=4)
 AXES = {
     "alpha": [0.05, 0.2, 0.3],       # disk size: guarantee target (Pareto axis)
-    "window": [100, 200, 600],       # disk size: how long outlier errors linger
+    "window": [200, 300, 600],       # disk size: how long outlier errors linger
     "gamma": [0.003, 0.03],          # ACI adaptation speed
     "replan_every": [2, 8],          # plan commitment
     "stale": [0.75, 1.0],            # replan-on-divergence threshold

@@ -51,13 +51,17 @@ def in_wall(p, margin=RADIUS):
 
 
 class Env:
-    def __init__(self, seed=0):
+    def __init__(self, seed=0, deference=0.4):
+        # deference: the radius pedestrians assign to the robot in their ORCA
+        # sim — how much the crowd yields to it. Lower = more assertive crowd.
         self.rng = np.random.default_rng(seed)
+        self.deference = deference
         self.screen = None
 
     def reset(self, robot_start=(0.5, HEIGHT / 2)):
         self.robot = np.array(robot_start, dtype=float)
-        self.crowd = Crowd(N_PEDS, (WIDTH, HEIGHT), DT, RADIUS, PED_SPEED, self.rng, WALLS)
+        self.crowd = Crowd(N_PEDS, (WIDTH, HEIGHT), DT, RADIUS, PED_SPEED, self.rng, WALLS,
+                           robot_agent_radius=self.deference)
         return self._obs()
 
     def step(self, action):

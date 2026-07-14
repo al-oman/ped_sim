@@ -11,7 +11,7 @@ import rvo2
 
 
 class Crowd:
-    def __init__(self, n, bounds, dt, radius, speed, rng, walls=()):
+    def __init__(self, n, bounds, dt, radius, speed, rng, walls=(), robot_agent_radius=0.4):
         self.n, self.bounds, self.speed, self.rng = n, np.array(bounds), speed, rng
         self.radius, self.walls = radius, walls
         # args: dt, neighborDist, maxNeighbors, timeHorizon, timeHorizonObst, radius, maxSpeed
@@ -21,9 +21,11 @@ class Crowd:
         self.sim.processObstacles()
         for _ in range(n):
             self.sim.addAgent(tuple(self.free_point()))
-        # Robot agent gets an inflated radius so pedestrians give it a wide
-        # berth even though it never reciprocates the avoidance.
-        self.robot_id = self.sim.addAgent((0, 0), 5.0, 10, 2.0, 2.0, 0.4, speed, (0, 0))
+        # The radius pedestrians assign to the robot = how wide a berth the
+        # crowd really gives it (its "deference"). Inflated by default since
+        # the robot never reciprocates the avoidance.
+        self.robot_id = self.sim.addAgent((0, 0), 5.0, 10, 2.0, 2.0,
+                                          robot_agent_radius, speed, (0, 0))
         self.goals = np.array([self.free_point() for _ in range(n)])
         self.stuck = np.zeros(n)  # steps spent barely moving
 

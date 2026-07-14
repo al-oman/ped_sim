@@ -25,8 +25,8 @@ DEVICE = device_arg()
 NEAR = 0.6  # near-miss distance between centers, m (collision is < 0.5)
 
 
-def run(policy, seed, predictor=None, aci=None):
-    env = Env(seed=seed)
+def run(policy, seed, predictor=None, aci=None, deference=0.4):
+    env = Env(seed=seed, deference=deference)
     obs, done, steps, collisions = env.reset(), False, 0, 0
     if aci is not None:
         aci.past = []  # pending predictions don't survive a world reset
