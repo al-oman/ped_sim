@@ -30,6 +30,7 @@ from sim import DT, HORIZON, Env
 
 EPISODES = 40      # per condition; the "between" condition shifts after episode 20
 SHIFT_EP = 20
+DEFERENCE = 0.1    # assertive crowd: coverage misses have collision consequences
 SHIFT_STEP = 100   # for the mid-episode condition
 FAST = 2.0         # shifted pedestrian speed, m/s (normal is PED_SPEED = 1.2)
 MAX_STEPS = 600
@@ -57,7 +58,7 @@ CONDITIONS = {
 def episode(seed, policy, predictor, calib, shift):
     """One deployment episode. Returns per-step miss rates of the certified
     (k <= replan_every) disks and of all disks, and whether the robot made it."""
-    env = Env(seed=seed)
+    env = Env(seed=seed, deference=DEFERENCE)
     obs, done, steps = env.reset(), False, 0
     calib.past = []  # pending predictions don't survive a world reset
     miss_cert, miss_all = [], []
@@ -74,8 +75,9 @@ def episode(seed, policy, predictor, calib, shift):
 
 
 if __name__ == "__main__":
-    pairs = calibration_data()
-    print(f"calibrated on {len(pairs)} steps; per-disk coverage target {TARGET:.4f}")
+    pairs = calibration_data(deference=DEFERENCE)  # calibrate in the deployment regime
+    print(f"calibrated on {len(pairs)} steps (deference {DEFERENCE}); "
+          f"per-disk coverage target {TARGET:.4f}")
 
     results = {}  # (condition, calibrator) -> list of (miss_cert, miss_all, success)
     for cond, shifts in CONDITIONS.items():

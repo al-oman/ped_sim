@@ -26,12 +26,12 @@ CALIB_SEEDS = range(2000, 2020)
 ALPHA = 0.1
 
 
-def calibration_data():
+def calibration_data(deference=0.4):
     """(prediction, actual) pairs from unconstrained flow rollouts."""
     policy, predictor = FlowPolicy(device=DEVICE), ConstantVelocity(DT, HORIZON)
     pairs = []
     for seed in CALIB_SEEDS:
-        env = Env(seed=seed)
+        env = Env(seed=seed, deference=deference)
         obs, done, steps = env.reset(), False, 0
         while not done and steps < MAX_STEPS:
             pred = predictor.predict(obs["peds"])

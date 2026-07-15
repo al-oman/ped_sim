@@ -36,7 +36,8 @@ class FlowPolicy:
     kept out of it — see sample() in flow_model.py."""
 
     def __init__(self, path="flow.pt", dt=0.1, replan_every=4, margin=0.5,
-                 n_samples=4, tau=0.6, stale=0.5, device=None):
+                 n_samples=4, tau=0.6, stale=0.5, device=None,
+                 kappa=8.0, project=True):  # enforcement toggles (ablations)
         import torch
         from flow_model import BaselineUnet, TemporalUnet, UNet1D
         # map_location: checkpoints may carry the training device's tags
@@ -54,6 +55,7 @@ class FlowPolicy:
         self.model.to(self.device)
         self.ckpt, self.dt, self.replan_every, self.margin = ckpt, dt, replan_every, margin
         self.n_samples, self.tau, self.stale = n_samples, tau, stale
+        self.kappa, self.project = kappa, project
         self.step = 0
 
     def act(self, obs, disks=None):
@@ -76,13 +78,15 @@ class FlowPolicy:
 
             # Candidates: cold starts, plus warm starts seeded from what's
             # left of the previous plan (extended by its last displacement).
-            cands = [sample(self.model, cond, disks=model_disks, hard=self.replan_every)]
+            cands = [sample(self.model, cond, disks=model_disks, hard=self.replan_every,
+                            kappa=self.kappa, project=self.project)]
             old = getattr(self, "plan", None)
             if old is not None:
                 left = old[self.step:]
                 pad = left[-1] + (left[-1] - left[-2]) * np.arange(1, TRAJ_LEN - len(left) + 1)[:, None]
                 init = (np.vstack([left, pad]) - obs["robot"]) / std
                 cands.append(sample(self.model, cond, disks=model_disks, hard=self.replan_every,
+                                    kappa=self.kappa, project=self.project,
                                     init=torch.tensor(init.T, dtype=torch.float32,
                                                       device=self.device)[None],
                                     tau=self.tau))

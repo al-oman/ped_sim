@@ -220,7 +220,8 @@ def _project(x, centers, radii, scale, K):
 
 
 @torch.no_grad()
-def sample(model, cond, disks=None, steps=10, kappa=8.0, hard=None, init=None, tau=0.0):
+def sample(model, cond, disks=None, steps=10, kappa=8.0, hard=None, init=None, tau=0.0,
+           project=True):
     """Euler-integrate the learned velocity field from noise to trajectories.
 
     disks: optional keep-out regions as (centers, radii), centers (K, N, 2)
@@ -255,12 +256,12 @@ def sample(model, cond, disks=None, steps=10, kappa=8.0, hard=None, init=None, t
     for i in range(first, steps):
         t = torch.full((len(cond), 1), i / steps, device=cond.device)
         v = model(x, t, cond)
-        if disks is not None:
+        if disks is not None and kappa:  # kappa=0 disables the CBF brake (ablations)
             _cbf(x, v, centers, radii, kappa, K)
         x = x + v / steps
-        if disks is not None:
+        if disks is not None and project:
             _project(x, centers, radii, (i + 1) / steps, K)
-    if disks is not None:
+    if disks is not None and project:
         for _ in range(30):  # settle: leaving one disk can push a waypoint into another
             _project(x, centers, radii, 1.0, K)
     return x
