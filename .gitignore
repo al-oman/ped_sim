@@ -1,2 +1,2 @@
-__pycache__/
-sweep.csv
+__pycache__/*
+*.csv

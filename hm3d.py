@@ -254,10 +254,13 @@ class HM3DEnv:
     blocking. `reactive` is the crowd's robot-avoidance knob (0 = Falcon)."""
 
     def __init__(self, grid, episode, dt=0.1, robot_speed=1.0, human_speed=1.0,
-                 radius=0.25, goal_thresh=0.3, reactive=0.0):
+                 radius=0.25, goal_thresh=0.3, reactive=0.0, collision_ends=False):
         self.grid, self.episode, self.dt = grid, episode, dt
         self.robot_speed, self.human_speed = robot_speed, human_speed
         self.radius, self.goal_thresh, self.reactive = radius, goal_thresh, reactive
+        # Falcon ends the episode (as a failure) on the first human collision;
+        # set True to match its human_collision / success semantics.
+        self.collision_ends = collision_ends
 
     def reset(self):
         start = self.episode["robot_start"]
@@ -286,9 +289,10 @@ class HM3DEnv:
         self.crowd.step(self.robot, vel)
 
         peds = self.crowd.positions()
-        collision = len(peds) and np.any(np.linalg.norm(peds - self.robot, axis=1) < 2 * self.radius)
+        collision = bool(len(peds) and np.any(np.linalg.norm(peds - self.robot, axis=1) < 2 * self.radius))
         reward = -1.0 if collision else 0.0
-        done = np.linalg.norm(self.robot - self.goal) < self.goal_thresh
+        self.reached = np.linalg.norm(self.robot - self.goal) < self.goal_thresh
+        done = self.reached or (self.collision_ends and collision)
         return self._obs(), reward, done
 
     def _obs(self):
