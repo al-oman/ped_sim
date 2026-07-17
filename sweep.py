@@ -15,7 +15,9 @@ import time
 
 import numpy as np
 
-from aci import ACI
+import sys
+
+from aci import CALIBRATORS, make_calibrator
 from eval import DEVICE, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
@@ -23,7 +25,11 @@ from sim import DT, HORIZON, N_PEDS
 
 EPISODES = 30
 SEEDS = range(1000, 1000 + EPISODES)
-OUT = "sweep.csv"
+# --cal=dtaci|max|max+ sweeps that calibrator instead (own CSV, so the
+# resume logic and existing aci results stay untouched). dtaci ignores gamma.
+CAL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cal=")), "aci")
+assert CAL in CALIBRATORS, f"--cal must be one of {list(CALIBRATORS)}"
+OUT = "sweep.csv" if CAL == "aci" else f"sweep_{CAL.replace('+', 'plus')}.csv"
 
 DEFAULTS = dict(alpha=0.1, window=100, gamma=0.01, replan_every=4,
                 stale=0.5, tau=0.6, n_samples=4)
@@ -52,8 +58,8 @@ def evaluate(cfg):
     policy = FlowPolicy(replan_every=cfg["replan_every"], n_samples=cfg["n_samples"],
                         tau=cfg["tau"], stale=cfg["stale"], device=DEVICE)
     predictor = ConstantVelocity(DT, HORIZON)
-    aci = ACI(alpha=cfg["alpha"], gamma=cfg["gamma"], horizon=HORIZON,
-              n_peds=N_PEDS, window=cfg["window"])
+    aci = make_calibrator(CAL, alpha=cfg["alpha"], gamma=cfg["gamma"], horizon=HORIZON,
+                          n_peds=N_PEDS, window=cfg["window"])
     rows = [run(policy, seed, predictor, aci) for seed in SEEDS]
     ok = [r for r in rows if r["success"]] or rows
     return {"success": np.mean([r["success"] for r in rows]),

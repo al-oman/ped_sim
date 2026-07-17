@@ -16,7 +16,7 @@ import time
 
 import numpy as np
 
-from aci import ACI, MaxACI
+from aci import ACI, DtACI, MaxACI, MaxDtACI, PartialMaxACI
 from eval import DEVICE, EPISODES, MAX_STEPS, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
@@ -53,14 +53,25 @@ def calibrators(pairs):
     """The comparison calibrators, warmed on identical data."""
     split = warmed(pairs, gamma=0.0, window=10 ** 6)  # split CP keeps all calibration scores
     split.freeze()
-    maxaci = MaxACI(alpha=ALPHA, gamma=0.01, horizon=HORIZON, n_peds=N_PEDS)
+    dtaci = DtACI(alpha=ALPHA, horizon=HORIZON, n_peds=N_PEDS)
+    maxdt = MaxDtACI(alpha=ALPHA, horizon=HORIZON, n_peds=N_PEDS)  # no gamma: self-tunes
+    maxes = {}
+    for name, cls in [("aci max  ", MaxACI), ("aci max+ ", PartialMaxACI)]:
+        m = cls(alpha=ALPHA, gamma=0.01, horizon=HORIZON, n_peds=N_PEDS)
+        maxes[name] = m
     for pred, actual in pairs:
-        maxaci.update(pred, actual)
-    maxaci.sigma_frozen = True  # lock the error scales once calibration ends
+        dtaci.update(pred, actual)
+        maxdt.update(pred, actual)
+        for m in maxes.values():
+            m.update(pred, actual)
+    for m in (*maxes.values(), maxdt):
+        m.sigma_frozen = True  # lock the error scales once calibration ends
     return {"split cp ": split,
             "online cp": warmed(pairs, gamma=0.0),
             "aci      ": warmed(pairs, gamma=0.01),
-            "aci max  ": maxaci}
+            "dtaci    ": dtaci,
+            **maxes,
+            "aci maxdt": maxdt}
 
 
 if __name__ == "__main__":

@@ -6,15 +6,15 @@ pedestrian. Smoothness metrics: heading change per step, acceleration, jerk.
 
 The "flow + aci" row runs the flow model with ACI-constrained sampling (disks
 around predicted pedestrians enforced during generation); its ACI calibrator
-persists across episodes. Seeds are outside the training range (train.py uses
-0..EPISODES) so the flow model is evaluated on crowds it has never seen."""
+persists across episodes. Seeds are outside the training range (the dataset
+uses 0..episodes) so the flow model is evaluated on crowds it has never seen."""
 
 import time
 
 import numpy as np
 
-from aci import ACI
-from flow_model import device_arg
+from aci import make_calibrator
+from diffuser.utils import device_arg
 from policies import FlowPolicy, OrcaExpert
 from predictor import ConstantVelocity
 from sim import DT, HEIGHT, HORIZON, N_PEDS, WALLS, WIDTH, Env
@@ -82,13 +82,19 @@ def run(policy, seed, predictor=None, aci=None, deference=0.4):
 if __name__ == "__main__":
     print(f"flow policies on device: {DEVICE}")
     setups = {
-        "orca expert": (OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT, walls=WALLS), False),
-        "flow": (FlowPolicy(device=DEVICE), False),
-        "flow + aci": (FlowPolicy(device=DEVICE), True),
+        "orca expert": (OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT, walls=WALLS), None),
+        "flow": (FlowPolicy(device=DEVICE), None),
+        # one row per calibrator (see aci.CALIBRATORS)
+        "flow + aci": (FlowPolicy(device=DEVICE), "aci"),
+        "flow + dtaci": (FlowPolicy(device=DEVICE), "dtaci"),
+        "flow + max": (FlowPolicy(device=DEVICE), "max"),
+        "flow + max+": (FlowPolicy(device=DEVICE), "max+"),
+        "flow + maxdt+": (FlowPolicy(device=DEVICE), "maxdt+"),
     }
-    for name, (policy, constrained) in setups.items():
+    for name, (policy, cal) in setups.items():
+        constrained = cal is not None
         predictor = ConstantVelocity(DT, HORIZON) if constrained else None
-        aci = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS) if constrained else None
+        aci = make_calibrator(cal, alpha=0.1, horizon=HORIZON, n_peds=N_PEDS) if constrained else None
         t0 = time.time()
         rows = [run(policy, seed, predictor, aci) for seed in range(1000, 1000 + EPISODES)]
         ok = [r for r in rows if r["success"]] or rows  # task metrics: successful eps only

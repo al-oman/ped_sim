@@ -26,9 +26,7 @@ done when the robot reaches the right edge.
 import numpy as np
 import pygame
 
-from aci import MaxACI, ACI
 from pedestrians import Crowd
-from policies import FlowPolicy, OrcaExpert, WalkForward
 from predictor import ConstantVelocity
 
 WIDTH, HEIGHT = 12.0, 8.0   # meters
@@ -123,6 +121,13 @@ class Env:
                         else:
                             pygame.draw.circle(self.screen, (90, 90, 90), px(c),
                                                int((r + RADIUS) * PX_PER_M), width=1)
+            # The predicted trajectory the disks are centered on: a path from
+            # each pedestrian through its HORIZON predicted positions.
+            for n, start in enumerate(self.crowd.positions()):
+                pts = [px(start)] + [px(p) for p in prediction[:, n]]
+                pygame.draw.lines(self.screen, (220, 140, 60), False, pts, 2)
+                for p in pts[1:]:
+                    pygame.draw.circle(self.screen, (220, 140, 60), p, 3)
         if plan is not None:
             for p in plan:
                 pygame.draw.circle(self.screen, (80, 160, 255), px(p), 3)
@@ -131,25 +136,56 @@ class Env:
 
 
 if __name__ == "__main__":
+    import argparse
+
+    from aci import CALIBRATORS, make_calibrator
+    from policies import FlowPolicy, OrcaExpert, WalkForward
+
+    ap = argparse.ArgumentParser(
+        description="Live demo: one rendered episode. White circles are the "
+                    "calibrated keep-out disks, orange the predicted pedestrian "
+                    "paths they are centered on, blue dots the robot's plan.")
+    ap.add_argument("--cal", choices=list(CALIBRATORS), default="aci",
+                    help="disk calibrator — union-bound per-lookahead trackers "
+                         "(aci, dtaci) vs max-over-horizon aggregation (max, max+); "
+                         "dtaci and max+ are the self-tuning/lag-free variants")
+    ap.add_argument("--policy", choices=["flow", "orca", "walk"], default="flow")
+    ap.add_argument("--alpha", type=float, default=0.1,
+                    help="target tube miscoverage (default 0.1)")
+    args = ap.parse_args()
+
     env = Env()
-    policy = FlowPolicy()           # swap in any object with .act(obs)
-    # policy = OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT, radius=0.25, walls=WALLS)
-    # policy = WalkForward()
+    policy = {"flow": FlowPolicy,
+              "orca": lambda: OrcaExpert(goal=(WIDTH - 0.3, HEIGHT / 2), dt=DT,
+                                         radius=0.25, walls=WALLS),
+              "walk": WalkForward}[args.policy]()
     predictor = ConstantVelocity(DT, HORIZON)
-    aci = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)  # swap in ACI(...) for the union-bound method
+    aci = make_calibrator(args.cal, alpha=args.alpha, horizon=HORIZON, n_peds=N_PEDS)
 
     obs = env.reset()
     done = False
     total_reward, misses, steps = 0.0, 0.0, 0
+    tube_miss, tube_n, pending = 0.0, 0, []
     while not done and steps < 600:  # cap, in case a policy gets stuck at the wall
         prediction = predictor.predict(obs["peds"])
         obs, reward, done = env.step(policy.act(obs, (prediction, aci.radii())))
-        misses += aci.update(prediction, obs["peds"][:, :2])[0].mean()  # k=1, avg over peds
+        missed = aci.update(prediction, obs["peds"][:, :2])
+        misses += missed[0].mean()  # k=1, avg over peds
+        # Tube bookkeeping as in eval.py: a prediction's tube fails if ANY of
+        # its HORIZON lookaheads missed — the alpha-level guarantee event.
+        pending.insert(0, np.zeros((HORIZON, missed.shape[1]), bool))
+        for j in range(len(missed)):
+            pending[j][j] = missed[j]
+        if len(pending) == HORIZON:  # oldest prediction fully checked
+            tube_miss += pending.pop().any(axis=0).mean()
+            tube_n += 1
         total_reward += reward
         steps += 1
         env.render(disks=(prediction, aci.radii()), plan=getattr(policy, "plan", None),
                    certified=getattr(policy, "replan_every", 0))
     radii = aci.radii()
-    print(f"total reward {total_reward}, k=1 coverage {1 - misses / steps:.3f} "
-          f"(tube target {1 - aci.alpha}), "
+    tube = f"{1 - tube_miss / tube_n:.3f}" if tube_n else "n/a"
+    print(f"policy {args.policy}, calibrator {args.cal}: total reward {total_reward}, "
+          f"k=1 coverage {1 - misses / steps:.3f}, tube coverage {tube} "
+          f"(target {1 - aci.alpha}), "
           f"mean radii k=1 {radii[0].mean():.3f} m ... k={HORIZON} {radii[-1].mean():.3f} m")

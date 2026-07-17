@@ -12,6 +12,7 @@ import numpy as np
 import rvo2
 
 from hm3d import astar, carrot
+from policies import FlowPolicy as ToyFlowPolicy
 from vendor_falcon import compute_orca_velocity
 
 
@@ -33,6 +34,25 @@ class AStarPolicy:
 
     def act(self, obs, disks=None):
         return self.speed * self._steer(obs)
+
+
+class FlowPolicy(ToyFlowPolicy):
+    """The flow-matching policy on HM3D: identical receding-horizon planning
+    and constrained sampling to the toy FlowPolicy, but conditioned the way
+    the HM3D model was trained (diffuser/datasets/hm3d.py) — carrot vector on
+    an A* path plus the K nearest pedestrians. Plans once per episode goal,
+    like AStarPolicy."""
+
+    def __init__(self, grid, path="hm3d_flow.pt", **kw):
+        super().__init__(path=path, **kw)
+        self.grid, self.goal, self.astar_path = grid, None, None
+
+    def _condition(self, obs):
+        from diffuser.datasets import hm3d_condition
+        if self.goal is None or not np.allclose(obs["goal"], self.goal):
+            self.goal = obs["goal"].copy()
+            self.astar_path = astar(self.grid, obs["robot"], obs["goal"])
+        return hm3d_condition(obs, self.astar_path if self.astar_path else [obs["goal"]])
 
 
 class RvoPolicy(AStarPolicy):

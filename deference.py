@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from aci import ACI, MaxACI
+from aci import ACI, DtACI, MaxACI, MaxDtACI, PartialMaxACI
 from eval import DEVICE, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
@@ -32,7 +32,10 @@ if __name__ == "__main__":
     for d in DEFERENCE:
         for name, calib in [("raw      ", None),
                             ("union aci", ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)),
-                            ("max aci  ", MaxACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS))]:
+                            ("dtaci    ", DtACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)),
+                            ("max aci  ", MaxACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)),
+                            ("max+ aci ", PartialMaxACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS)),
+                            ("maxdt+ aci", MaxDtACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS))]:
             policy = FlowPolicy(device=DEVICE)
             predictor = ConstantVelocity(DT, HORIZON) if calib else None
             t0 = time.time()

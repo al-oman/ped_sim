@@ -20,7 +20,9 @@ import time
 
 import numpy as np
 
-from aci import ACI
+import sys
+
+from aci import CALIBRATORS, make_calibrator
 from eval import DEVICE, run
 from policies import FlowPolicy
 from predictor import ConstantVelocity
@@ -28,6 +30,9 @@ from sim import DT, HORIZON, N_PEDS
 
 DEF = 0.1
 N_EP = 50
+# --cal=dtaci|max|max+ runs the ablation under that calibrator (default aci)
+CAL = next((a.split("=", 1)[1] for a in sys.argv if a.startswith("--cal=")), "aci")
+assert CAL in CALIBRATORS, f"--cal must be one of {list(CALIBRATORS)}"
 VARIANTS = [
     ("full (replan 4)", dict()),
     ("projection only", dict(kappa=0)),
@@ -41,7 +46,7 @@ if __name__ == "__main__":
     out = []
     for name, kw in VARIANTS:
         policy = FlowPolicy(device=DEVICE, **(kw or {}))
-        calib = ACI(alpha=0.1, horizon=HORIZON, n_peds=N_PEDS) if kw is not None else None
+        calib = make_calibrator(CAL, alpha=0.1, horizon=HORIZON, n_peds=N_PEDS) if kw is not None else None
         predictor = ConstantVelocity(DT, HORIZON) if calib else None
         t0 = time.time()
         rows = [run(policy, seed, predictor, calib, deference=DEF)
@@ -60,8 +65,9 @@ if __name__ == "__main__":
               f"collisions {line['collisions']:.2f}, closest {line['closest']:.2f} m, "
               f"heading {line['heading']:.1f} deg{tube} [{time.time() - t0:.0f}s]")
 
-    with open("ablation.csv", "w", newline="") as f:
+    out_csv = "ablation.csv" if CAL == "aci" else f"ablation_{CAL.replace('+', 'plus')}.csv"
+    with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, out[0].keys())
         w.writeheader()
         w.writerows(out)
-    print("wrote ablation.csv")
+    print(f"wrote {out_csv}")

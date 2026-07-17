@@ -33,13 +33,13 @@ class FlowPolicy:
 
     If disks are passed to act(), sampling is constrained: each disk is
     inflated by `margin` (the two body radii) and generated waypoints are
-    kept out of it — see sample() in flow_model.py."""
+    kept out of it — see conditional_sample() in diffuser/models/cfm.py."""
 
     def __init__(self, path="flow.pt", dt=0.1, replan_every=4, margin=0.5,
                  n_samples=4, tau=0.6, stale=0.5, device=None,
                  kappa=8.0, project=True):  # enforcement toggles (ablations)
         import torch
-        from flow_model import BaselineUnet, TemporalUnet, UNet1D
+        from diffuser.models import CFM, TemporalUnet
         # map_location: checkpoints may carry the training device's tags
         # (e.g. mps from a Mac), which other machines can't materialize.
         ckpt = torch.load(path, weights_only=False, map_location="cpu")
@@ -47,10 +47,15 @@ class FlowPolicy:
         # overhead makes them slower there (measured). Pass device="mps" if
         # the model grows.
         self.device = device or "cpu"
-        # Old checkpoints (no "arch" key) are the original small UNet1D.
-        cls = {"temporal": TemporalUnet, "baseline": BaselineUnet}.get(ckpt.get("arch"), UNet1D)
-        self.model = cls(ckpt["cond_dim"])
-        self.model.load_state_dict(ckpt["model"])
+        horizon = ckpt.get("horizon", 16)
+        net = TemporalUnet(horizon=horizon, transition_dim=2, cond_dim=0)
+        self.model = CFM(net, horizon=horizon, cond_dim=ckpt["cond_dim"])
+        state = ckpt.get("ema", ckpt["model"])  # EMA weights at test time
+        if ckpt.get("arch") == "baseline":  # legacy flow.pt: BaselineUnet keys
+            state = {"model." + k.removeprefix("net."): v for k, v in state.items()}
+        # strict=False: legacy checkpoints lack the (constant) loss weights buffer
+        missing, unexpected = self.model.load_state_dict(state, strict=False)
+        assert not unexpected and set(missing) <= {"loss_fn.weights"}, (missing, unexpected)
         self.model.eval()
         self.model.to(self.device)
         self.ckpt, self.dt, self.replan_every, self.margin = ckpt, dt, replan_every, margin
@@ -58,15 +63,20 @@ class FlowPolicy:
         self.kappa, self.project = kappa, project
         self.step = 0
 
+    def _condition(self, obs):
+        """The observation vector the model was trained on; environment
+        variants (see hm3d_policies.FlowPolicy) override this."""
+        from diffuser.datasets import condition
+        return condition(obs)
+
     def act(self, obs, disks=None):
         import torch
-        from flow_model import TRAJ_LEN, condition, sample
         # Resample on schedule, or if the plan no longer matches reality
         # (e.g., the env was reset under us, or the robot got blocked).
         if (self.step % self.replan_every == 0
                 or np.linalg.norm(self.plan[self.step] - obs["robot"]) > self.stale):
             std = self.ckpt["traj_std"]
-            c = (condition(obs) - self.ckpt["cond_mean"]) / self.ckpt["cond_std"]
+            c = (self._condition(obs) - self.ckpt["cond_mean"]) / self.ckpt["cond_std"]
             cond = torch.tensor(c, dtype=torch.float32, device=self.device).repeat(self.n_samples, 1)
             model_disks = None
             if disks is not None:
@@ -78,20 +88,20 @@ class FlowPolicy:
 
             # Candidates: cold starts, plus warm starts seeded from what's
             # left of the previous plan (extended by its last displacement).
-            cands = [sample(self.model, cond, disks=model_disks, hard=self.replan_every,
-                            kappa=self.kappa, project=self.project)]
+            kw = dict(disks=model_disks, hard=self.replan_every,
+                      kappa=self.kappa, project=self.project)
+            cands = [self.model.conditional_sample(cond, **kw)]
             old = getattr(self, "plan", None)
             if old is not None:
                 left = old[self.step:]
-                pad = left[-1] + (left[-1] - left[-2]) * np.arange(1, TRAJ_LEN - len(left) + 1)[:, None]
+                horizon = self.model.horizon
+                pad = left[-1] + (left[-1] - left[-2]) * np.arange(1, horizon - len(left) + 1)[:, None]
                 init = (np.vstack([left, pad]) - obs["robot"]) / std
-                cands.append(sample(self.model, cond, disks=model_disks, hard=self.replan_every,
-                                    kappa=self.kappa, project=self.project,
-                                    init=torch.tensor(init.T, dtype=torch.float32,
-                                                      device=self.device)[None],
-                                    tau=self.tau))
-            trajs = torch.cat(cands).cpu().numpy() * std    # (M, 2, TRAJ_LEN)
-            plans = obs["robot"] + trajs.transpose(0, 2, 1)  # (M, TRAJ_LEN, 2)
+                cands.append(self.model.conditional_sample(
+                    cond, **kw, tau=self.tau,
+                    init=torch.tensor(init, dtype=torch.float32, device=self.device)[None]))
+            trajs = torch.cat(cands).cpu().numpy() * std   # (M, horizon, 2)
+            plans = obs["robot"] + trajs
 
             # Score and pick: smooth, consistent with the old plan, safe.
             cost = np.abs(np.diff(plans, 2, axis=1)).sum(axis=(1, 2))
