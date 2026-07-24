@@ -22,7 +22,7 @@ import numpy as np
 from hm3d_eval import evaluate, scene_index, summary
 from hm3d_policies import AStarPolicy, FlowPolicy, RvoPolicy
 
-REACTIVE = [0.1, 0.3, 1.0]   # 0 = Falcon baseline, measured separately
+REACTIVE = [0.0, 0.1, 0.3, 1.0]   # 0 = Falcon (robot-blind) baseline
 N_PER_SCENE = 5
 OUT = "hm3d_exp2.csv"
 

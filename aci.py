@@ -98,6 +98,7 @@ class MaxACI:
         self.scores = [[] for _ in range(n_peds)]  # max-scores, per pedestrian
         self.sigma = None                          # (horizon,) error scale per lookahead
         self.sigma_frozen = False                  # stop sigma drift (diagnostics)
+        self.debt = np.zeros(n_peds)               # queued -gamma penalties (max+ variants)
         self.miss_log = []                         # internal tube misses, per finalization
         self.past = []                             # (prediction, error table), newest first
         self.frozen = False
@@ -235,6 +236,15 @@ class PartialMaxACI(MaxACI):
        the guarantee's fixed point is unchanged; the dial just reacts
        immediately instead of up to horizon steps later.
 
+    Penalties are rate-limited to one -gamma per step; a burst of tube
+    violations (a sharp pedestrian turn can break up to horizon in-flight
+    tubes within a few steps) queues as debt paid on later steps. Every
+    ACI variant assumes at most one dial move per step — that premise is
+    what bounds alpha_t near [0, 1] — and delivering a burst all at once
+    drives the dial deeply negative, pinning radii at the buffer max for
+    many steps. Queueing restores the one-move-per-step invariant; the
+    total delivered is unchanged.
+
     The transient cost: running maxes underestimate final scores, so radii
     lean slightly small until pending predictions finalize; the dial's
     prompt miss penalty is what corrects for that."""
@@ -269,7 +279,11 @@ class PartialMaxACI(MaxACI):
             if not self.frozen:
                 if j == 0:
                     self.alpha_t += self.gamma * self.alpha  # budget, paid up front
-                self.alpha_t -= self.gamma * ((errs[j] > radii[j]) & ~prior)
+                self.debt += (errs[j] > radii[j]) & ~prior
+        if not self.frozen:
+            pay = np.minimum(self.debt, 1.0)  # rate-limit: one -gamma per step
+            self.alpha_t -= self.gamma * pay
+            self.debt -= pay
         if len(self.past) == self.horizon:  # the oldest is now fully resolved
             _, errs, outcomes = self.past.pop()
             if not self.frozen:
@@ -341,7 +355,9 @@ class MaxDtACI(PartialMaxACI):
 
     def update(self, prediction, actual):
         """Same interface and displayed-disks grading as PartialMaxACI.update;
-        the dial bank replaces the single dial and gains the weight update."""
+        the dial bank replaces the single dial and gains the weight update.
+        Penalties are debt-queued (one per step) exactly as in PartialMaxACI —
+        the bank's large-gamma dials are what made burst delivery explosive."""
         self.past.insert(0, (prediction,
                              np.full((self.horizon, len(actual)), np.nan),
                              np.zeros((self.horizon, len(actual)), bool)))
@@ -355,8 +371,11 @@ class MaxDtACI(PartialMaxACI):
             if not self.frozen:  # lag-free split, applied to every dial in the bank
                 if j == 0:
                     self.alpha_t += self.gammas[:, None] * self.alpha  # budget, up front
-                newly = (errs[j] > radii[j]) & ~prior
-                self.alpha_t -= self.gammas[:, None] * newly[None, :]
+                self.debt += (errs[j] > radii[j]) & ~prior
+        if not self.frozen:
+            pay = np.minimum(self.debt, 1.0)  # rate-limit: one -gamma_i per step
+            self.alpha_t -= self.gammas[:, None] * pay[None, :]
+            self.debt -= pay
         if len(self.past) == self.horizon:  # the oldest is now fully resolved
             _, errs, outcomes = self.past.pop()
             if not self.frozen:

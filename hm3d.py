@@ -183,10 +183,24 @@ class WaypointCrowd:
     NEIGHBOR = 5.0   # only avoid agents within this range, m
     REACH = 0.3      # subwaypoint reached, m
 
-    def __init__(self, humans, grid, dt, speed=1.0, reactive=0.0):
-        self.grid, self.dt, self.speed, self.reactive = grid, dt, speed, reactive
+    def __init__(self, humans, grid, dt, speed=1.0, reactive=0.0,
+                 rng=None, start_jitter=0.0, speed_jitter=0.0):
+        self.grid, self.dt, self.reactive = grid, dt, reactive
         self.goals = [np.asarray(h, float) for h in humans]  # (k, 2) patrol waypoints
         self.pos = np.array([h[0] for h in self.goals])      # start at waypoint 0
+        # Per-rollout stochasticity (fidelity_check --repeats): jitter each
+        # human's start and speed so repeats of one episode differ, the way
+        # habitat's stochastic humans gave Falcon ~15 distinct rollouts per
+        # episode. rng=None (default) => deterministic, exactly as before.
+        self.speeds = np.full(self.n, speed, float)
+        if rng is not None:
+            if start_jitter:
+                for i in range(self.n):
+                    p = self.pos[i] + rng.normal(scale=start_jitter, size=2)
+                    self.pos[i] = p if grid.navigable(p) else \
+                        grid.to_world(_nearest_free(grid.nav, grid.to_cell(p)))
+            if speed_jitter:
+                self.speeds *= 1 + rng.uniform(-speed_jitter, speed_jitter, self.n)
         self.prev = self.pos.copy()
         self.goal_idx = [1 % len(h) for h in self.goals]     # heading to waypoint 1
         self.path = [self._plan(i) for i in range(self.n)]
@@ -233,7 +247,7 @@ class WaypointCrowd:
     def step(self, robot_pos, robot_vel=None):
         new = self.pos.copy()
         for i in range(self.n):
-            move = self._heading(i, robot_pos) * self.speed * self.dt
+            move = self._heading(i, robot_pos) * self.speeds[i] * self.dt
             if self.grid.navigable(self.pos[i] + move):
                 new[i] = self.pos[i] + move  # else blocked: hold (A* shouldn't, nudge might)
         self.prev, self.pos = self.pos, new
@@ -254,13 +268,16 @@ class HM3DEnv:
     blocking. `reactive` is the crowd's robot-avoidance knob (0 = Falcon)."""
 
     def __init__(self, grid, episode, dt=0.1, robot_speed=1.0, human_speed=1.0,
-                 radius=0.25, goal_thresh=0.3, reactive=0.0, collision_ends=False):
+                 radius=0.25, goal_thresh=0.3, reactive=0.0, collision_ends=False,
+                 rng=None, start_jitter=0.0, speed_jitter=0.0):
         self.grid, self.episode, self.dt = grid, episode, dt
         self.robot_speed, self.human_speed = robot_speed, human_speed
         self.radius, self.goal_thresh, self.reactive = radius, goal_thresh, reactive
         # Falcon ends the episode (as a failure) on the first human collision;
         # set True to match its human_collision / success semantics.
         self.collision_ends = collision_ends
+        # per-rollout human stochasticity (see WaypointCrowd); rng=None = off
+        self.rng, self.start_jitter, self.speed_jitter = rng, start_jitter, speed_jitter
 
     def reset(self):
         start = self.episode["robot_start"]
@@ -269,7 +286,9 @@ class HM3DEnv:
         self.robot = np.array(start, float)
         self.goal = self.episode["robot_goal"]
         self.crowd = WaypointCrowd(self.episode["humans"], self.grid, self.dt,
-                                   self.human_speed, self.reactive)
+                                   self.human_speed, self.reactive, rng=self.rng,
+                                   start_jitter=self.start_jitter,
+                                   speed_jitter=self.speed_jitter)
         return self._obs()
 
     def step(self, action):

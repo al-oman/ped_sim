@@ -40,19 +40,43 @@ class FlowPolicy(ToyFlowPolicy):
     """The flow-matching policy on HM3D: identical receding-horizon planning
     and constrained sampling to the toy FlowPolicy, but conditioned the way
     the HM3D model was trained (diffuser/datasets/hm3d.py) — carrot vector on
-    an A* path plus the K nearest pedestrians. Plans once per episode goal,
-    like AStarPolicy."""
+    an A* path plus the K nearest pedestrians, either their current state or
+    their predicted futures depending on the checkpoint's cond_mode. Plans
+    once per episode goal, like AStarPolicy.
 
-    def __init__(self, grid, path="hm3d_flow.pt", **kw):
+    predictor: for futures-conditioned checkpoints, the predictor whose
+    forecasts feed the condition. Defaults to a fresh instance matching the
+    checkpoint's cond_mode; pass the eval loop's instance to share state
+    (mandatory for stateful predictors like Social-LSTM, so the condition
+    and the ACI disks see the same forecast)."""
+
+    def __init__(self, grid, path="hm3d_flow.pt", predictor=None, **kw):
         super().__init__(path=path, **kw)
         self.grid, self.goal, self.astar_path = grid, None, None
+        self.cond_mode = self.ckpt.get("cond_mode", "state")
+        self.predictor = predictor
+        if self.predictor is None and self.cond_mode != "state":
+            self.predictor = make_predictor(self.cond_mode, self.model.horizon)
 
     def _condition(self, obs):
         from diffuser.datasets import hm3d_condition
         if self.goal is None or not np.allclose(obs["goal"], self.goal):
             self.goal = obs["goal"].copy()
             self.astar_path = astar(self.grid, obs["robot"], obs["goal"])
-        return hm3d_condition(obs, self.astar_path if self.astar_path else [obs["goal"]])
+        pred = self.predictor.predict(obs["peds"]) if self.predictor is not None else None
+        return hm3d_condition(obs, self.astar_path if self.astar_path else [obs["goal"]],
+                              pred=pred)
+
+
+def make_predictor(cond_mode, horizon, dt=0.1):
+    """The predictor a futures-conditioned checkpoint was trained with."""
+    from predictor import ConstantVelocity, SocialLSTM
+    name = cond_mode.removeprefix("futures-")
+    if name == "ConstantVelocity":
+        return ConstantVelocity(dt, horizon)
+    if name == "SocialLSTM":
+        return SocialLSTM(dt, horizon)  # loads social_lstm.pt
+    raise ValueError(f"unknown cond_mode {cond_mode}")
 
 
 class RvoPolicy(AStarPolicy):

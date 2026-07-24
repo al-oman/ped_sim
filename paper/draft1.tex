@@ -1,0 +1,426 @@
+\documentclass[letterpaper]{article} % DO NOT CHANGE THIS
+\usepackage[submission]{aaai2027}  % DO NOT CHANGE THIS
+% The serif, sans-serif, and monospaced fonts are loaded automatically by
+% aaai2027.sty (newtxtext, helvet, courier). DO NOT add \usepackage{times},
+% \usepackage{helvet}, \usepackage{courier}, or any other font package.
+\usepackage[hyphens]{url}  % DO NOT CHANGE THIS
+\usepackage{graphicx} % DO NOT CHANGE THIS
+\urlstyle{rm} % DO NOT CHANGE THIS
+\def\UrlFont{\rm}  % DO NOT CHANGE THIS
+\usepackage{natbib}  % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\usepackage{caption} % DO NOT CHANGE THIS AND DO NOT ADD ANY OPTIONS TO IT
+\frenchspacing  % DO NOT CHANGE THIS
+%
+% These are recommended to typeset algorithms but not required. See the subsubsection on algorithms. Remove them if you don't have algorithms in your paper.
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{amssymb}
+\usepackage{mathtools}
+
+%
+% These are recommended to typeset listings but not required. See the subsubsection on listing. Remove this block if you don't have listings in your paper.
+\usepackage{newfloat}
+\usepackage{listings}
+\DeclareCaptionStyle{ruled}{labelfont=normalfont,labelsep=colon,strut=off} % DO NOT CHANGE THIS
+\lstset{%
+	basicstyle={\footnotesize\ttfamily},% footnotesize acceptable for monospace
+	numbers=left,numberstyle=\footnotesize,xleftmargin=2em,% show line numbers, remove this entire line if you don't want the numbers.
+	aboveskip=0pt,belowskip=0pt,%
+	showstringspaces=false,tabsize=2,breaklines=true}
+\floatstyle{ruled}
+\newfloat{listing}{tb}{lst}{}
+\floatname{listing}{Listing}
+
+%
+% Recommended for better-looking tables
+\usepackage{booktabs}
+
+%
+% Keep the \pdfinfo as shown here. There's no need
+% for you to add the /Title and /Author tags.
+\pdfinfo{
+/TemplateVersion (2027.1)
+}
+
+% DISALLOWED PACKAGES
+% \usepackage{authblk} -- This package is specifically forbidden
+% \usepackage{balance} -- This package is specifically forbidden
+% \usepackage{CJK} -- This package is specifically forbidden
+% \usepackage{float} -- This package is specifically forbidden
+% \usepackage{flushend} -- This package is specifically forbidden
+% \usepackage{fullpage} -- This package is specifically forbidden
+% \usepackage{geometry} -- This package is specifically forbidden
+% \usepackage{hyperref} -- This package is specifically forbidden
+% \usepackage{navigator} -- This package is specifically forbidden
+% (or any other package that embeds links such as navigator or hyperref)
+% \usepackage{indentfirst} -- This package is specifically forbidden
+% \usepackage{layout} -- This package is specifically forbidden
+% \usepackage{multicol} -- This package is specifically forbidden
+% \usepackage{nameref} -- This package is specifically forbidden
+% \usepackage{savetrees} -- This package is specifically forbidden
+% \usepackage{setspace} -- This package is specifically forbidden
+% \usepackage{stfloats} -- This package is specifically forbidden
+% \usepackage{tabu} -- This package is specifically forbidden
+% \usepackage{titlesec} -- This package is specifically forbidden
+% \usepackage{tocbibind} -- This package is specifically forbidden
+% \usepackage{ulem} -- This package is specifically forbidden
+% \usepackage{wrapfig} -- This package is specifically forbidden
+% DISALLOWED COMMANDS
+% \nocopyright -- Your paper will not be published if you use this command
+% \addtolength -- This command may not be used
+% \balance -- This command may not be used
+% \baselinestretch -- Your paper will not be published if you use this command
+% \clearpage -- No page breaks of any kind may be used for the final version of your paper
+% \columnsep -- This command may not be used
+% \newpage -- No page breaks of any kind may be used for the final version of your paper
+% \pagebreak -- No page breaks of any kind may be used for the final version of your paper
+% \pagestyle -- This command may not be used
+% \tiny -- This is not an acceptable font size.
+% \vspace{- -- No negative value may be used in proximity of a caption, figure, table, section, subsection, subsubsection, or reference
+% \vskip{- -- No negative value may be used to alter spacing above or below a caption, figure, table, section, subsection, subsubsection, or reference
+
+\setcounter{secnumdepth}{1} %May be changed to 1 or 2 if section numbers are desired.
+
+% The file aaai2027.sty is the style file for AAAI Press
+% proceedings, working notes, and technical reports.
+%
+
+% Title
+
+% Your title must be in mixed case, not sentence case.
+% That means all verbs (including short verbs like be, is, using,and go),
+% nouns, adverbs, adjectives should be capitalized, including both words in hyphenated terms, while
+% articles, conjunctions, and prepositions are lower case unless they
+% directly follow a colon or long dash
+\title{Adaptive Conformal Inference for Safe Crowd Navigation Using Flow-Matching}
+\author{
+    Anonymous Submission
+}
+\affiliations{
+
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Diffusion and Flow-Matching methods have recently gained popularity as path planners for their ability to produce multi-modal trajectories. The stochastic nature of these models necessitates safety guarantees, which prior work has pursued in static settings using Conformal Prediction (CP) to generate prediction sets. CP methods, however, require exchangeability between the calibration and deployment data, and therefore their safety certificates are invalidated under conditions with shifting distributions, such as social navigation. Adaptive Conformal Inference (ACI) is a family of online algorithms whose prediction sets provably achieve a target long-run coverage rate regardless of the distribution shift. We introduce ACI-Flow, a social navigation planner that constrains each step of a flow-matching sampler to remain outside calibrated uncertainty regions around predicted pedestrians, and incorporate Partial-Max, a novel aggregation scheme that retains the tighter sets of max-based scoring while removing its horizon-length feedback delay. 
+We evaluate ACI-Flow using controlled distribution shifts built from the Social-MP3D and Social-HM3D datasets, demonstrating that the method maintains the target 90\% coverage (realized 91\%) where static CP degrades to 81\%, while surpassing the baselines' success rate and keeping collision rate near the expert's. Partial-Max reduces adaptation delay by 34\% and halves the coverage dip.  
+\end{abstract}
+
+\begin{links}
+    \link{Code}{anonymous.4open.science/r/ped_sim-4E8E/}
+\end{links}
+
+\section{Introduction}
+
+As mobile robots become increasingly ubiquitous in human environments, the presence of rigorous fail-safes becomes critical \cite{on_the_safety_of_mobile_robots}. Obstacle avoidance alone is insufficient for mobile robots to operate seamlessly in human spaces, as they need to understand, predict, and react to both crowd and individual dynamics~\cite{social_LSTM, gao_evaluation_2022}.
+
+Diffusion and flow-matching (FM) models have exploded in popularity for generating intricate images and videos from text-based prompts. Recent research in applying these architectures to trajectory planning has shown promise in producing sophisticated and multi-modal behavior. These generative models are intrinsically stochastic, meaning that without safety checks their output can be unpredictable. There is relatively little to lose when undesired output is produced in image generation, but when applied to social navigation these outputs can have serious safety concerns. In efforts to mitigate these risks, recent work has begun to incorporate safety guarantees into diffusion and FM planners using control barrier functions (CBFs), control Lyapunov functions, and Hamilton-Jacobi reachability methods~\cite{mizuta_cobl-diffusion_2024}~\cite{yang_safeflowmatcher_2025}~\cite{xiao_safediffuser_2023}~\cite{dai_safeflow_2025}. 
+
+
+Conformal prediction (CP) methods generate prediction sets with a guaranteed coverage rate around the output of any prediction model. Their application to generative planners remains limited and confined to stationary distributions. CP methods are dependent on the assumption of exchangeability between calibration and deployment data. Social navigation requires operating in dynamic environments with unknown agents who respond to the robot's actions, time-dependent features like traffic or weather, and need to navigate broad range of environments, like traversing from a well-lit room to a crowded hallway to a dimly-lit stairwell. These features can make it infeasible to guarantee exchangeability during deployment, motivating the search for a more adaptive safety mechanism than CP. 
+
+Adaptive conformal inference (ACI) is an online extension of CP which bypasses the need for exchangeability by adapting the prediction set's response to new data via ongoing recalibration. This is what inspired our proposed method, \textit{ACI-Flow}.
+
+We propose applying the principles of dynamically-tuned ACI (DtACI) to implement safety guarantees in a FM social navigation planner. The calibrated sets produced by DtACI become keep-out regions enforced at every step of the FM sampler through a CBF-style brake on the velocity field. We also replace the conformity score aggregation: our Partial-Max scheme keeps the smaller prediction sets of max-over-horizon scoring while removing its horizon-length feedback delay.
+
+
+Our contributions are as follows:
+\begin{itemize}
+    \item We use ACI to implement safety guarantees through the sampling process of a Flow-Matching trajectory planner. 
+    \item We introduce the Partial-Max aggregation scheme to reduce adaptation delay on sudden distribution shifts while maintaining a reduction in prediction region size. 
+    \item We deploy the ACI-Flow in a 2D port of the Social-HM3D and Social-MP3D datasets, demonstrating the improved adaptability of our method.
+\end{itemize}
+
+\section{Related Work}
+
+\subsection{Conformal Prediction}
+\label{subsec:cp}
+
+Conformal Prediction quantifies the uncertainty of any predictor with a distribution-free coverage guarantee~\cite{stephen_gentle_2021}. The guarantee rests on exchangeability between calibration and deployment data, which fails under distribution shift and in online settings where the environment responds to the planner's actions. ACI extends CP to these settings by recalibrating online, trading the per-step guarantee for a long-run one.
+
+\citeauthor{zaffran_aci_time_series_2022} remove the need to hand-pick ACI's step size by tracking several step sizes at once and aggregating them in an online fashion. \citeauthor{cleaveland_conformal_2024} calibrate a full predicted trajectory with a single score that takes the largest weighted error across the horizon, which gives tighter sets than calibrating each step on its own. CP and ACI have also been used to constrain classical planners, where the set around a predicted agent becomes a keep-out constraint for a model predictive controller~\cite{lindemann_safe_2023}~\cite{dixit_aci-planning_2023}. All of these works calibrate a fixed predictor or feed a classical planner; we instead enforce the calibrated set inside a generative flow-matching sampler, whose own actions shift the data the calibrator sees.
+
+\subsection{Safety Guarantees in Generative Models}
+
+Diffusion and FM models are increasingly used for trajectory planning due to their multi-modal generation~\cite{chi_diffusion_2023}~\cite{navDP_2025}~\cite{NoMaD_2024}~\cite{fan_diffusion_2025}, beginning with the Diffuser framework~\cite{janner_planning_2022} and extending to action chunking~\cite{chi_diffusion_2023}, hierarchical planning, and egocentric visual input~\cite{NoMaD_2024}~\cite{shah_vint_2023}~\cite{navDP_2025}. FM offers training and sampling efficiency gains over diffusion~\cite{lipman_flowmatching_2022}, making it appealing for time-sensitive control. These models are intrinsically stochastic, and integrating rigorous safety guarantees while preserving their performance is an active area.
+
+The SafeDiffuser paper \cite{xiao_safediffuser_2023} enforces static constraints during diffusion sampling using CBF-style steps, and \citeauthor{yang_safeflowmatcher_2025} extends this method to FM in SafeFlowMatcher. Other work has implemented similar methods to enforce constraints during sampling; Constrained Diffusers~\cite{zhang_constrained_2026} use projection and Lagrangian updates, while \citeauthor{gadginmath_constricting-cbf_2026} use a safety tube which constricts the distribution towards the safe set during the sampling process. Methods from control theory have also been used to achieve safe generation. CoBL-Diffusion~\cite{mizuta_cobl-diffusion_2024} uses CBFs and Lyapunov functions, and DualShield~\cite{yang_dualshield_2026} uses Hamilton-Jacobi reachability methods. \citeauthor{mizuta_unified_2025} pair guided FM with sampling-based constraint enforcement.
+
+All of these methods assume a predetermined safe set. PlanCP~\cite{planCP} instead uses CP to conformalize a diffusion planner's output against exchangeable expert trajectories; unlike PlanCP, we calibrate the predicted humans online with ACI, retaining validity under distribution shift, and enforce the calibrated set as a hard keep-out region inside the sampler.
+
+\section{Preliminaries}
+\subsection{Flow-Matching}
+
+We follow the FM formulation of \citet{lipman_flowmatching_2022}, in the notation of \citet{yang_safeflowmatcher_2025}. Within this subsection \(t \in [0,1]\) denotes flow time; elsewhere \(t\) indexes decision steps.
+
+Let \(\boldsymbol{\tau}=(\tau^0, \tau^1, \hdots, \tau^H)\) represent a path of waypoints with planning horizon length \(H \in \mathbb{N}\). We use a time-dependent vector field \(v_t(\cdot;\theta)\) to create a flow map \(\psi_t\) which describes the path from the initial probability distribution \(p_0\) to the desired distribution \(p_1\), which is defined as follows 
+\[
+\frac{d}{dt}\psi_t(\boldsymbol{\tau})=v_t(\psi_t(\boldsymbol{\tau});\theta),\qquad \psi_0(\boldsymbol{\tau})=\boldsymbol{\tau}.
+\]
+Note that the time \(t \in [0,1]\) does not represent the real-world time of traveling along the trajectory, instead it represents the timestep used to traverse the flow field, following the probability path:
+\[
+p_t(\boldsymbol{\tau}|\boldsymbol{\tau}_1)=\mathcal{N}(\boldsymbol{\tau}; \mu_t(\boldsymbol{\tau}_1),\sigma^2_t\mathbf{I}),
+\]
+\[
+\mu_t(\boldsymbol{\tau}_1)=t\boldsymbol{\tau}_1, \qquad \sigma_t=1-t.
+\]
+Note that this is one of many possible paths for \(p_t\), but for the sake of simplicity in this paper we will focus only on the optimal transport (OT) case. It is the goal of FM to approximate the velocity field \(u_t\) created by this probability path using the learned \(v_t\), which for the OT case and \(t\in[0,1)\) is defined as follows:
+\[
+u_t(\boldsymbol{\tau} \mid \boldsymbol{\tau}_1)=\frac{\boldsymbol{\tau}_1-\boldsymbol{\tau}}{1-t}.
+\]
+One sample of such path can also be defined as:
+\[
+\boldsymbol{\tau}_t=(1-t)\boldsymbol{\tau}_0+t\boldsymbol{\tau}_1.
+\]
+The FM objective function trains \(v_t(\boldsymbol{\tau}_t;\theta)\) to match the conditional velocity \(u_t(\boldsymbol{\tau}_t\mid\boldsymbol{\tau}_1)\), which in the OT case simplifies to:
+\[
+\mathcal{L}(\theta)=\mathbb{E}_{t, q(\boldsymbol{\tau}_1), p_0(\boldsymbol{\tau}_0)}\big\|v_t(\boldsymbol{\tau}_t;\theta)-(\boldsymbol{\tau}_1-\boldsymbol{\tau}_0)\big\|^2
+.\]
+For more complete definitions with proofs, see \cite{lipman_flowmatching_2022}.
+
+\subsection{Control Barrier Functions}
+Consider a control-affine system \(\dot{x} = f(x) + g(x)u\) with control
+\(u \in \mathcal{U}\) and safe set \(\mathcal{C} := \{x : b(x) \ge 0\}\) for a
+continuously differentiable \(b\). \(b\) is a CBF if there exists an extended
+class-\(\mathcal{K}\) function \(\rho\) with
+\[
+\sup_{u \in \mathcal{U}} \big[\, L_f b(x) + L_g b(x)\,u + \rho\big(b(x)\big) \,\big] \ge 0,
+\]
+where \(L_f b, L_g b\) are the Lie derivatives of \(b\) along \(f\) and \(g\); any
+such \(u\) renders \(\mathcal{C}\) forward invariant~\cite{ames_cbf-qp_2017}.
+SafeDiffuser~\cite{xiao_safediffuser_2023} and
+SafeFlowMatcher~\cite{yang_safeflowmatcher_2025} apply this to trajectory generation
+by treating the sampler as the system: writing the sampling update as
+\(\dot{\boldsymbol\tau} = u\) gives \(f = 0,\ g = I\), where \(u\) is the sampler
+control (distinct from the FM target field \(u_t(\cdot \mid \boldsymbol{\tau}_1)\)).
+Applied independently to each waypoint \(\tau^k\), the condition reduces to
+\[
+\nabla b(\tau^k)^\top u^k + \rho\big(b(\tau^k)\big) \ge 0 .
+\]
+
+At every denoising step in SafeDiffuser, and in a post-hoc correction phase in SafeFlowMatcher, The sampler's update is corrected by a quadratic program that minimally perturbs it. This brakes a waypoint's motion toward the unsafe set as it nears the
+boundary.
+
+\subsection{Conformal Prediction}
+Let \(X_{t}, Y_{t}\) denote a new data point with only \(X_{t}\) observed. We aim to form a prediction set \(\hat{C}_t\) for \(Y_t\) using the previously observed data \(
+(X_1, Y_1), \ldots, (X_{t-1}, Y_{t-1}) \in \mathbb{R}^d \times \mathbb{R}
+\). Given a target miscoverage \(\alpha \in (0,1)\), we aim to guarantee that \(Y_t \in \hat{C}_t\) holds \(100(1-\alpha)\%\) of the time.
+
+ \textbf{Static CP.} CP methods aim to achieve this task by defining a conformity score \(S(\cdot)\) to measure how well the candidate point \(y\) generated at time \(t\) by a prediction model whose goal is to predict \(Y\) from \(X\) conforms to the previously observed data.
+Split CP separates the observed data into two sets: one used to train the prediction model and another \(\mathcal{D}_{cal} \subseteq {(X_r,Y_r)}_{1 \le r \le t-1}\) for calibration. If the calibration examples in \(\mathcal{D}_{cal}\) and the test
+example \((X_t,Y_t)\) are exchangeable, then \(y\) is a candidate value for \(Y_t\) whenever \(S(X_t,y) \le \hat{Q}(1-\alpha)\), where \(\hat{Q}(1-\alpha)\) is the
+\(\lceil(|\mathcal{D}_{cal}|+1)(1-\alpha)\rceil\)-th smallest calibration score, with the
+\((|\mathcal{D}_{cal}|+1)\)-th score taken to be \(+\infty\)~\cite{gibbs2024conformal}.
+Then, if we define the prediction set to be 
+\[\hat{C}_{t}:=\left\{y:S(X_t,y)\leq \hat{Q}(1-\alpha)\right\},\]
+it can be said that
+\(
+\mathbb{P}(Y_t \in \hat{C}_t) = \mathbb{P}(S(X_t, Y_t) \le \hat{Q}(1-\alpha)) \geq 1-\alpha
+\) is the marginal coverage guarantee.
+
+\textbf{Adaptive Conformal Inference.} The aim of ACI is to accommodate shifting distributions by relinquishing the need for the assumption of exchangeability. To achieve this, we build a CP algorithm to update its own response based on an online stream of new data points, replacing \(S(\cdot)\), \(\hat{Q}(\cdot)\), and \(\alpha\) with their respective time-varying  counterparts, \(S_t(\cdot)\), \(\hat{Q}_t(\cdot)\), and \(\alpha_t\).
+
+We define the miscoverage rate of \(\hat{C}_t(\alpha)\) as
+\[M_t(\alpha):=\mathbb{P}\!\left(S_t(X_t,Y_t)>\hat{Q}_t(1-\alpha)\right)\]
+noting that since the data distribution can be shifting we can not expect the value of \(M_t(\alpha)\) to be close to that of \(\alpha\). However, if we define an alternate value
+\[
+\alpha_t^* := \sup\{\beta \in [0,1] : M_t(\beta) \le \alpha\},
+\]
+under the assumption that \(M_t\) is continuous, the supremum is attained and \(M_t(\alpha_t^*)=\alpha\).
+
+We use the sequence of miscoverage events:
+\[
+\mathrm{err}_t := 
+\begin{cases}
+0, & \text{if } Y_t \in \hat{C}_t(\alpha_t),\\
+1, & \text{if } Y_t \notin \hat{C}_t(\alpha_t),\\
+\end{cases}
+\]
+to produce the following online update algorithm:
+\[
+\alpha_{t+1}= \alpha_t + \gamma (\alpha - \mathrm{err}_t),
+\]
+where \(\gamma\) is a parameter representing step size. 
+
+\textbf{Dynamically-Tuned ACI.} The step size \(\gamma\) trades adaptation speed
+against stability, and the original ACI work selects it by hand. \citet{gibbs2024conformal}
+remove this knob with Dynamically-Tuned ACI (DtACI), which runs a bank of \(m\) step
+sizes in parallel and plays their weighted-average level, reweighting each online by
+its recent pinball loss so the values tracking coverage best are favored. We use DtACI
+only as a step-size-free baseline; our method fixes a single \(\gamma\).
+
+\textbf{Horizon Aggregation} The planner requires an agent's entire predicted horizon to be covered at once for the safety certificate to remain valid. The union-bound approach~\cite{lindemann_safe_2023} calibrates each of the \(H\) look-ahead steps separately at quantile level \(1-\alpha/H\), so the tube \(\{\hat{C}_t^k\}_{k=1}^{H}\) fails only if some step fails and holds jointly at \(1-\alpha\). This method produces conservative sets due to each being calibrated at the tight \(1-\alpha/H\) quantile.
+
+\citeauthor{cleaveland_conformal_2024} use an alternative aggregation approach, where they replace the per-point conformity score with a single trajectory-level nonconformity score (the counterpart of \(S\)) for an entire predicted trajectory
+\[
+R := \max_{1 \le k \le H} \, \lambda_k\, R_p\!\left(Y_t^k, \hat{Y}_t^k\right),
+\]
+where \(Y_t^k, \hat{Y}_t^k\) are the true and predicted position \(k\) steps ahead, \(R_p\) is the per-step prediction error, and the weights
+\(\lambda_1,\dots,\lambda_H \ge 0\), normalized to sum to one, are fit on a calibration set by minimizing the size of the resulting region. Calibrating this one score at \(1-\alpha\) yields a region for the full trajectory without splitting the budget across steps, giving tighter sets than the union bound for the same trajectory-level guarantee.
+
+
+%--------------------------------------------------------------
+%----------------------TASK FORMULATION------------------------
+%--------------------------------------------------------------
+\section{Methods}
+code contribution\\
+enough algorithmic detail for reproducibility
+
+overview\\
+
+
+\textbf{ACI-Sized Keep-Out Disks}
+To incorporate adaptability under distribution shift we produce the disks defining each barrier \(b^k_n\) using ACI. At every prediction time step the predictor outputs \(H\) waypoints for each of the \(N\) pedestrians. The locations of these waypoints are the disk centers \(c^k_n\), and the disk radii \(r^k_n\) are the adapted quantiles of the predictor's recent errors. We set $\lambda_k$ inversely proportional to a running mean of the step-$k$ errors $R_p$, replacing the offline fit of \citeauthor{cleaveland_conformal_2024}, which requires a static calibration set. Radii follow as $r^k_n = \hat Q_n(1-\alpha_t)/\lambda_k$, one adapted quantile $\hat Q_n$ per pedestrian. The centers move with the crowd and the radii track the forecaster's live error, so the safe set is recalibrated every step.
+
+We form the radii using the max-over-horizon score rather than the union bound, as described in~\cite{cleaveland_conformal_2024}. A shortcoming to this method is that when run in an online setting the score can lag; a prediction's score is only complete once its final predicted waypoint resolves \(H\) steps later. We reduce this lag while maintaining the max-over-horizon method's smaller disk size using two changes to the algorithm (Partial-Max, below).
+
+
+
+\textbf{Partial-Max} A prediction with \(j \le H\) resolved steps contributes its running max \(\max_{1\le k\le j}\lambda_k R_p(Y^k_t,\hat Y^k_t)\) to the quantile buffer. The dial update \(\gamma(\alpha-\mathrm{err}t)\) is delivered in two prompt pieces: \(\alpha{t+1} = \alpha_t + \gamma\alpha\) when a prediction is issued, and \(\alpha_{t+1} = \alpha_t - \gamma\) at the first step its displayed tube is violated
+
+\begin{algorithm}[t]
+\caption{Deterministic Mean DtACI}
+\label{eq:determinisitc-mean_dtaci}
+\begin{algorithmic}[1]
+\STATE \textbf{Data:} Observed values $\{\beta_t\}_{1\le t\le T}$, set of candidate $\gamma$ values $\{\gamma_i\}_{1\le i\le m}$, starting points $\{\alpha_i^1\}_{1\le i\le m}$, and parameters $\sigma$ and $\eta$.
+\STATE $w_1^i \leftarrow 1,\quad 1\le i\le m;$ 
+\FOR{$t=1,2,\ldots,T$}
+\STATE Define $p_t^i := w_t^i/{\sum_{1\le j\le m} w_t^j},\quad \forall\,1\le i\le m;$ 
+\STATE $\alpha_t \leftarrow \sum_{i=1}^{m} p_t^i \, \alpha_t^i$;
+\STATE $\bar{w}_t^i \leftarrow w_t^i \exp\!\left(-\eta\ell(\beta_t,\alpha_t^i)\right), \forall\,1\le i\le m;$ 
+\STATE $\bar{W}_t \leftarrow \sum_{1\le i\le m} \bar{w}_t^i;$ 
+\STATE $w_{t+1}^i \leftarrow (1-\sigma)\bar{w}_t^i+\bar{W}_t\sigma/m;$ 
+\STATE $\mathrm{err}_t^i := \mathbb{I}{\{Y_t\notin \hat{C}_t(\alpha_t^i)}\}, \forall\,1\le i\le m;$ 
+\STATE $\mathrm{err}_t := \mathbb{I}{\{Y_t\notin \hat{C}_t(\alpha_t)}\};$ 
+\STATE $\alpha_{t+1}^i \leftarrow \alpha_t^i + \gamma_i(\alpha-\mathrm{err}_t^i),\forall\,1\le i\le m;$ 
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Enforcement in the Sampler}
+For disk \(n\) constraining waypoint \(\tau^k\), we define the barrier as the signed distance to a calibrated keep-out disk,
+\[
+b^k_n(\tau^k) = \lVert \tau^k - c^k_n \rVert - r^k_n \ge 0,
+\]
+so a waypoint is safe when it lies outside every disk. Taking the linear class-\(\mathcal{K}\) function \(\rho(b) = \kappa b\) and the model's velocity \(v^k\) as the nominal control, the minimally perturbed update solves, per disk,
+\[
+u'^k = \arg\min_{u}\ \lVert u - v^k \rVert^2
+\quad \text{s.t.} \quad
+\nabla b^{k\top}_n\, u + \kappa\, b^k_n \ge 0 ,
+\]
+which, for this single linear constraint, has the closed form
+\[
+u'^k = v^k + \max\!\big(0,\ -\kappa\, b^k_n - v^k \cdot \nabla b^k_n \big)\,\nabla b^k_n .
+\]
+The gradient with respect to \(\tau^k\) is the outward unit normal,
+\[
+\nabla b^k_n = \frac{\tau^k - c^k_n}{\lVert \tau^k - c^k_n \rVert}.
+\]
+Because sampling begins at noise, which violates the disks, this brake drives waypoints toward the safe set rather than merely holding them inside it. The brake shapes the flow but does not guarantee that the discrete output satisfies the constraints, since Euler steps and overlapping disks can leave a waypoint inside a disk. After each sampling step \(i\) we therefore project, for each disk \(n\), every violating waypoint back onto that disk's boundary,
+\[
+\tau^k \leftarrow c^k_n + \frac{\tau^k - c^k_n}{\lVert \tau^k - c^k_n \rVert}\, s_i\, r^k_n
+\quad \text{whenever } \lVert \tau^k - c^k_n \rVert < s_i\, r^k_n ,
+\]
+where the scale \(s_i = (i+1)/N\) grows the disks from zero to full radius over the
+\(N\) sampling steps. The disks are initially small and barely disturb the trajectory, letting the learned field route freely; as \(s_i \to 1\) the projection tightens to
+the calibrated radius. A final pass at \(s_i = 1\), repeated until convergence to resolve waypoints pushed from one disk into a neighbor, makes every returned waypoint satisfy \(b^k_n \ge 0\) by construction.
+
+
+\subsection{Futures Conditioning}
+Conditioning on the same forecasts the disks constrain (shared predictor instance), resolving the plan-vs-constraint disagreement.
+\subsection{Deployment}
+Per-episode calibrator reset, robot-free warmup replay, and isotropic normalization so disks stay circular.
+
+\section{Experiments}
+
+\subsection{Simulation Setup}
+The \textit{Falcon} social navigation paper \cite{falcon} introduces the Social-HM3D and Social-MP3D datasets, an extension of the \textit{HM3D} and \textit{MP3D} datasets~\cite{ramakrishnan_hm3d_2021}~\cite{chang_mp3d_2017} which adds natural human movements and trajectories to the photorealistic \textit{Habitat-Sim} simulator. Since our method does not require visual input, we bypass the computational overhead of the photorealistic elements by using 2D maps generated using \textit{Habitat-Sim}'s built-in tools and implement the human trajectories in this simplified environment. The Falcon implementations of the ORCA and ASTAR baselines were modified for compatibility in a continuous action space, and fidelity between the discrete and continuous counterparts was quantitatively determined to be sufficient for baseline comparison.
+
+\subsection{Main Comparison}
+
+\subsection{Ablation Study}
+
+
+\begin{table}[!ht]
+    \centering
+    \begin{tabular}{|l|l|l|l|l|}
+    \hline
+        reactivity & 0.0 & 0.1 & 0.3 & 1.0 \\ \hline
+        astar & 45.7 & 60.0 & 80.0 & 78.6 \\ \hline
+        rvo & 50.0 & 57.1 & 64.3 & 67.1 \\ \hline
+        flow & 44.3 & 54.3 & 77.1 & 84.3 \\ \hline
+        flow+aci & 57.1 & 61.4 & 87.1 & 87.1 \\ \hline
+        flow+maxdt+ & 54.3 & 60.0 & 84.3 & 84.3 \\ \hline
+    \end{tabular}
+    \caption{sr vs reactivity}
+\end{table}
+
+\begin{table}[!ht]
+    \centering
+    \begin{tabular}{|l|l|l|l|}
+    \hline
+        reactive & CR & SR & closest\_median\_m \\ \hline
+        0.0 & 22.9 & 57.1 & 0.62 \\ \hline
+        0.1 & 20.0 & 61.4 & 0.77 \\ \hline
+        0.3 & 2.9 & 87.1 & 1.22 \\ \hline
+        1.0 & 2.9 & 87.1 & 1.37 \\ \hline
+    \end{tabular}
+    \caption{flow aci distribution shift}
+\end{table}
+
+\begin{table}[!ht]
+    \centering
+    \begin{tabular}{|l|l|l|l|l|l|l|}
+    \hline
+        reactivity & astar SR & astar CR & rvo SR & rvo CR & aci SR & aci CR \\ \hline
+        0.0 & 45.7 & 52.9 & 50.0 & 8.6 & 57.1 & 22.9 \\ \hline
+        0.1 & 60.0 & 37.1 & 57.1 & 5.7 & 61.4 & 20.0 \\ \hline
+        0.3 & 80.0 & 15.7 & 64.3 & 1.4 & 87.1 & 2.9 \\ \hline
+        1.0 & 78.6 & 17.1 & 67.1 & 1.4 & 87.1 & 2.9 \\ \hline
+    \end{tabular}
+    \caption{baselines}
+\end{table}
+
+
+\section{Conclusion}
+
+
+\appendix
+\section{Simulation Fidelity Comparison}
+\begin{table}[!ht]
+    \centering
+    \begin{tabular}{|l|l|l|l|l|l|}
+    \hline
+        metric & falcon\_astar & ours\_astar & falcon\_orca & ours\_orca & ours\_rvo2 \\ \hline
+        success & 0.4533 & 0.7000 & 0.3800 & 0.7000 & 0.8000 \\ \hline
+        CR & 0.5467 & 0.3000 & 0.4267 & 0.3000 & 0.0000 \\ \hline
+        spl & 0.4442 & 0.7000 & 0.3250 & 0.7000 & 0.7704 \\ \hline
+    \end{tabular}
+    \caption{Fidelity: our 2D-holonomic sim vs Falcon's original habitat-sim, Social-HM3D minival}
+\end{table}
+
+\begin{table}[!ht]
+    \centering
+    \begin{tabular}{|l|cc|ccc|}
+        \hline
+        & \multicolumn{2}{c|}{Falcon} & \multicolumn{3}{c|}{Ours} \\ \cline{2-6}
+        Metric & A* & ORCA & A* & ORCA & RVO2 \\ \hline
+        Success & 0.4533 & 0.3800 & 0.7000 & 0.7000 & 0.8000 \\ \hline
+        CR & 0.5467 & 0.4267 & 0.3000 & 0.3000 & 0.0000 \\ \hline
+        SPL & 0.4442 & 0.3250 & 0.7000 & 0.7000 & 0.7704 \\ \hline
+    \end{tabular}
+    \caption{Fidelity: our 2D holonomic simulator vs. Falcon's original Habitat-Sim implementation on the Social-HM3D minival benchmark.}
+    \label{tab:fidelity}
+\end{table}
+
+
+\bibliography{references}
+
+% Check whether the conference requires a reproducibility checklist to be included in the paper.
+% If so, you can uncomment the following line and ajust the path to include it.
+% \input{ReproducibilityChecklist.tex}
+
+\end{document}

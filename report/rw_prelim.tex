@@ -1,0 +1,137 @@
+\section{Related Work}
+
+\subsection{Conformal Prediction}
+\label{subsec:cp}
+
+Conformal Prediction is a set of methods used to quantify the uncertainty of a prediction with a distribution-free coverage guarantee~\cite{stephen_gentle_2021}. This coverage is dependent on the assumption that the observed and calibration data are exchangeable. In situations with shifting distributions, such as a robot crossing from one room to another; or online data observations, like an environment which responds to a planner's action, this assumption can be infeasible. ACI extends the coverage guarantee to these environments by making the method adapt its response based on recently gathered observations. The presence of an online environment softens the guarantee, since it is not confined to producing observations corresponding to the calibration distribution. This means that rather than per-step or per-episode coverage rate guarantees, ACI in online environments implements a convergent long-horizon guarantee; as \(t \rightarrow \infty\) the coverage approaches the predetermined rate. Conversely, rather than softening, CP methods will violate their guarantee entirely. 
+
+\citeauthor{zaffran_aci_time_series_2022} remove the need to hand-pick the step size by tracking several step sizes at once and aggregating them in an online fashion. \citeauthor{cleaveland_conformal_2024} calibrate a full predicted trajectory with a single score that takes the largest weighted error across the horizon, which gives tighter sets than calibrating each step on its own. These works calibrate the output of a fixed predictor. In our setting, the planner acts on the calibrated set, so its own actions shift the data the calibrator sees, which is the case ACI is built for.
+
+CP and ACI have been applied to planners in a pedestrian setting, where the set around a predicted agent becomes a constraint the planner avoids~\cite{lindemann_safe_2023}~\cite{dixit_aci-planning_2023}. Note that these works are based off a model predictive controller (MPC), a classical planner. We instead enforce the safe set inside a generative flow-matching sampler.
+
+\subsection{Diffusion and Flow-Matching Planners}
+
+The application of diffusion and FM models to trajectory planning is being increasingly explored due to their promising results in multi-modal trajectory generation~\cite{chi_diffusion_2023}~\cite{navDP_2025}~\cite{NoMaD_2024}~\cite{fan_diffusion_2025}. \citeauthor{janner_planning_2022} were the first to apply these models to creating trajectories in their Diffuser framework, using a diffusion model to generate trajectories for 2D maze navigation and robot path planning. This method has been extended to planners with action chunking~\cite{chi_diffusion_2023}, hierarchical planning, and egocentric visual input~\cite{NoMaD_2024}~\cite{shah_vint_2023}~\cite{navDP_2025}. 
+FM models have been emerging as an alternative to diffusion models~\cite{lipman_flowmatching_2022}. FM with optimal transport paths offers training and sampling efficiency gains over standard diffusion, making it appealing for time-sensitive control applications.
+
+\subsection{Safety Guarantees in Generative Models}
+
+Generative models can produce sophisticated behavior not possible for heuristic models, however, they are unable to offer the same predictability and reliability. Integration of rigorous safety guarantees within generative models has been explored as a way of mitigating these safety concerns while maintaining the model's performance. 
+
+The SafeDiffuser paper \cite{xiao_safediffuser_2023} enforces static constraints during diffusion sampling using CBF-style steps, and \citeauthor{yang_safeflowmatcher_2025} extends this method to FM in SafeFlowMatcher. Other work has implemented similar methods to enforce constraints during sampling; Constrained Diffusers~\cite{zhang_constrained_2026} use projection and Lagrangian updates, while \citeauthor{gadginmath_constricting-cbf_2026} use a safety tube which constricts the distribution towards the safe set during the sampling process. Methods from control theory have also been used to achieve safe generation. CoBL-Diffusion~\cite{mizuta_cobl-diffusion_2024} uses CBFs and Lyapunov functions, and DualShield~\cite{yang_dualshield_2026} uses Hamilton-Jacobi reachability methods. \citeauthor{mizuta_unified_2025} pair guided FM with sampling-based constraint enforcement.
+
+All of these methods involve the use of predetermined safe sets. CP has been used to produce safety guarantees in generative planners like PlanCP~\cite{planCP}; however, it is dependent on the exchangeability assumption in order to maintain guarantees. Our work differs in three distinct ways. First, PlanCP calibrates the uncertainty of the planner's output using exchangeable expert trajectories, while our method calibrates the future position of predicted human trajectories. Second, PlanCP relies on a fixed calibration set and invalidates its safety certificate if the distribution shifts, whereas ACI-Flow uses ACI to adapt to changing observation distributions. Third, PlanCP produces a coverage region to make planning uncertainty-aware, while we enforce the calibrated set as a hard keep-out region inside the flow-matching sampler. 
+
+\section{Preliminaries}
+\subsection{Flow-Matching}
+
+We use~\cite{yang_safeflowmatcher_2025}'s adaptation of the original FM algorithm~\cite{lipman_flowmatching_2022}.
+
+Let \(\boldsymbol{\tau}=(\tau^0, \tau^1, \hdots, \tau^H)\) represent a path of waypoints with planning horizon length \(H \in \mathbb{N}\). We use a time-dependent vector field \(v_t(\cdot;\theta)\) to create a flow field \(\psi_t\) which describes the path from the initial probability distribution \(p_0\) to the desired distribution \(p_1\), which is defined as follows 
+\[
+\frac{d}{dt}\psi_t(\boldsymbol{\tau})=v_t(\psi_t(\boldsymbol{\tau});\theta),\qquad \psi_0(\boldsymbol{\tau})=\boldsymbol{\tau}.
+\]
+Note that the time \(t \in [0,1]\) does not represent the real-world time of traveling along the trajectory, instead it represents the timestep used to traverse the flow field, following the probability path:
+\[
+p_t(\boldsymbol{\tau}|\boldsymbol{\tau}_1)=\mathcal{N}(\boldsymbol{\tau}; \mu_t(\boldsymbol{\tau}_1),\sigma^2_t\mathbf{I}),
+\]
+\[
+\mu_t(\boldsymbol{\tau}_1)=t\boldsymbol{\tau}_1, \qquad \sigma_t=1-t.
+\]
+Note that this is one of many possible paths for \(p_t\), but for the sake of simplicity in this paper we will focus only on the optimal transport (OT) case. It is the goal of FM to approximate the velocity field \(u_t\) created by this probability path using the learned \(v_t\), which for the OT case is defined as follows:
+\[
+u_t(\boldsymbol{\tau} \mid \boldsymbol{\tau}_1)=\frac{\boldsymbol{\tau}_1-\boldsymbol{\tau}}{1-t}.
+\]
+To achieve this, the FM objective function is defined as:
+\[
+\mathcal{L}(\theta)=\mathbb{E}_{t, q(\boldsymbol{\tau}_1), p_0(\boldsymbol{\tau}_0)}\big\| v_t(\psi_t(\boldsymbol{\tau}_0);\theta) - u_t \big\|^2
+.\]
+For the OT case this changes to:
+\[
+\mathcal{L}(\theta)=\mathbb{E}_{t, q(\boldsymbol{\tau}_1), p_0(\boldsymbol{\tau}_0)}\big\|v_t(\psi_t(\boldsymbol{\tau}_0);\theta)-(\boldsymbol{\tau}_1-\boldsymbol{\tau}_0)\big\|^2
+.\]
+For more complete definitions with proofs, see \cite{lipman_flowmatching_2022}.
+\subsection{Conformal Prediction}
+Let \(X_{t}, Y_{t}\) denote a new data point with only \(X_{t}\) observed. We aim to form a prediction set \(\hat{C}_t\) for \(Y_t\) using the previously observed data \(
+(X_1, Y_1), \ldots, (X_{t-1}, Y_{t-1}) \in \mathbb{R}^d \times \mathbb{R}
+\). Given a target coverage \(\alpha \in (0,1)\), we aim to guarantee that \(Y_t \in \hat{C}_t\) is true \(100(1-\alpha)\%\) of the time. 
+
+CP methods aim to achieve this task by defining a conformity score \(S(\cdot)\) to measure how well the candidate point \(y\) generated at time \(t\) by a prediction model whose goal is to predict \(Y\) from \(X\) conforms to the previously observed data.
+Split CP separates the observed data into two sets: one used to train the prediction model and another \(\mathcal{D}_{cal} \subseteq {(X_r,Y_r)}_{1 \le r \le t-1}\) for calibration. If \(\mathcal{D}_{cal}\) is exchangeable with the previously observed data then it can be said that if \(S(X_t,y) \le \hat{Q}(1-\alpha)\) then \(y\) is a candidate value for \(Y_t\), with \(\hat{Q}(1-\alpha)\) the fitted \((1-\alpha)\)-quantile of the conformity scores~\cite{gibbs2024conformal}.
+Then, if we define the prediction set to be 
+\[\hat{C}_{t}:=\left\{y:S(X_t,y)\leq \hat{Q}(1-\alpha)\right\},\]
+it can be said that
+\(
+\mathbb{P}(Y_t \in \hat{C}_t) = \mathbb{P}(S(X_t, Y_t) \le \hat{Q}(1-\alpha)) \geq 1-\alpha
+\) is the marginal coverage guarantee.
+
+\textbf{Adaptive Conformal Inference} The aim of ACI is to accommodate shifting distributions by relinquishing the need for the assumption of exchangeability. To achieve this, we build a CP algorithm to update its own response based on an online stream of new data points, replacing \(S(\cdot)\), \(\hat{Q}(\cdot)\), and \(\alpha\) with their respective time-varying  counterparts, \(S_t(\cdot)\), \(\hat{Q}_t(\cdot)\), and \(\alpha_t\).
+
+We define the miscoverage rate of \(\hat{C}_t(\alpha)\) as
+\[M_t(\alpha):=P(S_t(X_t,Y_t)>\hat{Q}_t(1-\alpha)\big),\]
+noting that since the data distribution can be shifting we can not expect the value of \(M(\alpha)\) to be close to that of \(\alpha\). However, if we define an alternate value
+\[
+\alpha_t^* := \sup\{\beta \in [0,1] : M_t(\beta) \le \alpha\},
+\]
+under the assumption that \(M_t\) is continuous, the supremum is attained and \(M_t(\alpha_t^*)=\alpha\).
+
+We use the sequence of miscoverage events:
+\[
+\mathrm{err}_t := 
+\begin{cases}
+0, & \text{if } Y_t \in \hat{C}_t(\alpha_t),\\
+1, & \text{if } Y_t \notin \hat{C}_t(\alpha_t),\\
+\end{cases}
+\]
+to produce the following online update algorithm:
+\[
+\alpha_{t+1}= \alpha_t + \gamma (\alpha - \mathrm{err}_t),
+\]
+where \(\gamma\) is a parameter representing step size. 
+
+\textbf{Dynamically-Tuned ACI}
+
+The parameter \(\gamma\) is used to balance the speed of adaptation with the stability of the predictions. The original ACI literature offers an empirically derived rule for selecting a value for \(\gamma\), but it ultimately is a trial-and-error approach. Later works implement a self-tuning mechanism that selects a value of \(\gamma\) from a set of \(k\) forecasters, one for each \(\gamma\) value being tracked. In ~\cite{gibbs2024conformal} this process is named Dynamically-Tuned ACI (DtACI). 
+
+The goal of DtACI is to monitor the performance of \(k\) values of \(\gamma\), and using recently observed data, tune the weights corresponding to each \(\gamma\) such that the value which most closely approximates the ideal miscoverage rate is favored. We define this miscoverage rate \(\beta_t\) such that \(\hat{C}_t(\beta_t)\) produces the smallest prediction set containing \(Y_t\), or formalized:
+\[
+\beta_t := \sup \{ \beta : Y_t\in \hat{C}_t(\beta)\}.
+\]
+Using the definition of pinball loss:
+\[
+\ell(\beta_t,\theta):=\alpha(\beta_t-\theta)-\min\{0,\beta_t-\theta\},
+\]
+It is shown in~\cite{gibbs2024conformal} that a gradient step on the pinball loss is equivalent to the regular ACI update:
+\[
+\alpha_{t+1} := \alpha_t - \gamma \,\nabla_{\theta}\ell(\beta_t,\alpha_t).
+\]
+The loss \(\ell(\beta_t,\theta)\) is used to re-tune the weight of each forecaster, so that the values of \(\gamma\) whose miscoverage stays closest to the target are favored. The full update is given in Algorithm~\ref{eq:dtaci}.
+
+
+\begin{algorithm}[t]
+\caption{DtACI, taken from~\cite{gibbs2024conformal}.}
+\label{eq:dtaci}
+\begin{algorithmic}[1]
+\STATE \textbf{Data:} Observed values $\{\beta_t\}_{1\le t\le T}$, set of candidate $\gamma$ values $\{\gamma_i\}_{1\le i\le k}$, starting points $\{\alpha_i^1\}_{1\le i\le k}$, and parameters $\sigma$ and $\eta$.
+\STATE $w_1^i \leftarrow 1,\quad 1\le i\le k;$ 
+\FOR{$t=1,2,\ldots,T$}
+\STATE Define $p_t^i := w_t^i/{\sum_{1\le j\le k} w_t^j},\quad \forall\,1\le i\le k;$ 
+\STATE Output $\alpha_t=\alpha_t^i$ with probability $p_t^i$; 
+\STATE $\bar{w}_t^i \leftarrow w_t^i \exp\!\left(-\eta\ell(\beta_t,\alpha_t^i)\right), \forall\,1\le i\le k;$ 
+\STATE $\bar{W}_t \leftarrow \sum_{1\le i\le k} \bar{w}_t^i;$ 
+\STATE $w_{t+1}^i \leftarrow (1-\sigma)\bar{w}_t^i+\bar{W}_t\sigma/k;$ 
+\STATE $\mathrm{err}_t^i := \mathbb{I}{\{Y_t\notin \hat{C}_t(\alpha_t^i)}\}, \forall\,1\le i\le k;$ 
+\STATE $\mathrm{err}_t := \mathbb{I}{\{Y_t\notin \hat{C}_t(\alpha_t)}\};$ 
+\STATE $\alpha_{t+1}^i \leftarrow \alpha_t^i + \gamma_i(\alpha-\mathrm{err}_t^i),\forall\,1\le i\le k;$ 
+\ENDFOR
+\end{algorithmic}
+\end{algorithm}
+
+\textbf{Horizon Aggregation} A planner requires an agent's entire predicted horizon to be covered at once for the safety certificate to remain valid. The union-bound approach~\cite{lindemann_safe_2023} calibrates each of the \(H\) look-ahead steps separately at level \(1-\alpha/H\), so the tube \(\{\hat{C}_t^k\}_{k=1}^{H}\) fails only if some step fails and holds jointly at \(1-\alpha\). However, this method produces conservative sets due to each being calibrated at the tight \(1-\alpha/H\) quantile.
+
+\citeauthor{cleaveland_conformal_2024} use an alternative aggregation approach, where they replace the per-point conformity score with a single trajectory-level nonconformity score (the counterpart of \(S\)) for an entire predicted trajectory
+\[
+R := \max_{1 \le k \le H} \, w_k\, R_p\!\left(Y_t^k, \hat{Y}_t^k\right),
+\]
+where \(Y_t^k, \hat{Y}_t^k\) are the true and predicted position \(k\) steps ahead, \(R_p\) is the per-step prediction error, and the weights
+\(w_1,\dots,w_H \ge 0\) are fit on a calibration set by minimizing the size of the resulting region. Calibrating this one score at \(1-\alpha\) yields a region for the full trajectory without splitting the budget across steps, giving tighter sets than the union bound for the same trajectory-level guarantee.

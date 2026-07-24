@@ -59,6 +59,8 @@ def warm_calibrator(calib, predictor, grid, ep, steps=150, reactive=0.0):
     perturbs nearby humans — acceptable: warmup is just a prior.)"""
     env = HM3DEnv(grid, ep, dt=DT, reactive=reactive)
     obs = env.reset()
+    if hasattr(predictor, "reset"):
+        predictor.reset()  # replay starts the episode's humans from frame 0
     for _ in range(steps):
         if not len(obs["peds"]):
             return
@@ -73,11 +75,19 @@ def run_episode(env, policy, grid, predictor=None, calib=None):
     toy eval loop — the calibrator is fresh per episode (crowd size varies),
     so it warms up within the episode (radii start infinite = disabled)."""
     obs = env.reset()
+    # Stateful predictors (SocialLSTM) carry per-episode history: clear it,
+    # both on the disk predictor and on the policy's conditioning predictor
+    # (often the same object — sharing is what keeps disks and conditioning
+    # looking at the same forecast).
+    for p in {id(p): p for p in (predictor, getattr(policy, "predictor", None))
+              if hasattr(p, "reset")}.values():
+        p.reset()
     optimal = astar(grid, obs["robot"], obs["goal"])
     if optimal is None:
         return None  # unreachable goal (disconnected navmesh island)
     opt_len = path_length(optimal)
     done, steps, collisions, closest, travelled, ever_collided = False, 0, 0, np.inf, 0.0, False
+    miss, miss_n, tube_miss, tube_n, pending = 0.0, 0, 0.0, 0, []
     prev = obs["robot"].copy()
     while not done and steps < MAX_STEPS:
         disks = None
@@ -86,7 +96,18 @@ def run_episode(env, policy, grid, predictor=None, calib=None):
             disks = (pred, calib.radii())
         obs, reward, done = env.step(policy.act(obs, disks))
         if disks is not None:
-            calib.update(pred, obs["peds"][:, :2])
+            missed = calib.update(pred, obs["peds"][:, :2])
+            # Realized coverage, as in the toy eval.py: certified disks
+            # (k <= replan_every) per step, and whole-tube outcomes (a tube
+            # fails if ANY of its HORIZON lookaheads missed).
+            miss += missed[:getattr(policy, "replan_every", len(missed))].mean()
+            miss_n += 1
+            pending.insert(0, np.zeros((HORIZON, missed.shape[1]), bool))
+            for j in range(len(missed)):
+                pending[j][j] = missed[j]
+            if len(pending) == HORIZON:
+                tube_miss += pending.pop().any(axis=0).mean()
+                tube_n += 1
         collisions += reward < 0
         ever_collided |= reward < 0
         if len(obs["peds"]):
@@ -98,13 +119,22 @@ def run_episode(env, policy, grid, predictor=None, calib=None):
     spl = success * opt_len / max(travelled, opt_len, 1e-6)
     return {"success": success, "human_collision": float(ever_collided),
             "steps": steps, "collisions": collisions,
-            "closest": closest if np.isfinite(closest) else np.nan, "spl": spl}
+            "closest": closest if np.isfinite(closest) else np.nan, "spl": spl,
+            "coverage": 1 - miss / miss_n if miss_n else np.nan,
+            "tube": 1 - tube_miss / tube_n if tube_n else np.nan}
 
 
 def evaluate(policy_factory, scene_idx, n_per_scene, seed=0, collision_ends=False,
              min_humans=1,  # min_humans=0: keep human-free episodes (Falcon scores them)
              calibrator=None,  # aci.CALIBRATORS name -> conformal disks reach the policy
-             reactive=0.0):  # crowd's robot-avoidance strength (0 = Falcon, Experiment 2)
+             reactive=0.0,  # crowd's robot-avoidance strength (0 = Falcon, Experiment 2)
+             human_speed=1.0,   # deployment crowd speed; warmup always calibrates at
+             gamma=0.01,        # 1.0, so human_speed != 1.0 is a calibration/deployment
+             freeze_after_warm=False,  # shift. freeze -> split CP (radii never adapt)
+             repeats=1, start_jitter=0.0, speed_jitter=0.0):  # per-rollout human
+             # stochasticity: run each episode `repeats` times with jittered human
+             # starts/speeds (rng seeded per repeat). Mirrors how habitat's stochastic
+             # humans gave Falcon ~15 rollouts per episode. repeats=1 => deterministic.
     from collections import defaultdict
     rng = np.random.default_rng(seed)
     rows = []
@@ -116,23 +146,48 @@ def evaluate(policy_factory, scene_idx, n_per_scene, seed=0, collision_ends=Fals
         by_grid = defaultdict(list)  # a scene spans floors; one policy per floor grid
         for i in idx:
             by_grid[id(pairs[i][0])].append(pairs[i])
+        ep_i = 0
         for group in by_grid.values():
             policy = policy_factory(group[0][0])
             for grid, ep in group:
-                predictor, calib = None, None
-                if calibrator is not None and len(ep["humans"]):
-                    from aci import make_calibrator
-                    from predictor import ConstantVelocity
-                    predictor = ConstantVelocity(DT, HORIZON)
-                    calib = make_calibrator(calibrator, alpha=0.1, horizon=HORIZON,
-                                            n_peds=len(ep["humans"]))
-                    warm_calibrator(calib, predictor, grid, ep, reactive=reactive)
-                    calib.past = []  # pending predictions don't survive the reset
-                r = run_episode(HM3DEnv(grid, ep, dt=DT, collision_ends=collision_ends,
-                                        reactive=reactive),
-                                policy, grid, predictor, calib)
-                if r:
-                    rows.append(r)
+                # Seed the flow sampler per episode so the whole table is
+                # reproducible and every policy meets identical noise on its
+                # k-th episode (flow sampling is otherwise unseeded -> ~+-4pt
+                # run-to-run SR variance at n~70). No-op for the classical
+                # baselines, which draw no noise.
+                for rep in range(repeats):
+                    import torch
+                    # seed the flow sampler per (episode, repeat) so the run is
+                    # reproducible and every policy meets identical model noise
+                    torch.manual_seed(1000 * seed + 97 * ep_i + rep)
+                    # per-repeat human jitter (off when start/speed_jitter == 0)
+                    ep_rng = np.random.default_rng(1000 * seed + 97 * ep_i + rep) \
+                        if (start_jitter or speed_jitter) else None
+                    predictor, calib = None, None
+                    if calibrator is not None and len(ep["humans"]):
+                        from aci import make_calibrator
+                        from predictor import ConstantVelocity
+                        # share the policy's conditioning predictor when it has one,
+                        # so the ACI disks calibrate the same forecast the flow
+                        # model is conditioned on
+                        predictor = getattr(policy, "predictor", None) or \
+                            ConstantVelocity(DT, HORIZON)
+                        # split CP needs every calibration score kept (big window)
+                        calib = make_calibrator(calibrator, alpha=0.1, horizon=HORIZON,
+                                                n_peds=len(ep["humans"]), gamma=gamma,
+                                                window=10 ** 6 if freeze_after_warm else 100)
+                        warm_calibrator(calib, predictor, grid, ep, reactive=reactive)
+                        calib.past = []  # pending predictions don't survive the reset
+                        if freeze_after_warm:
+                            calib.freeze()
+                    r = run_episode(HM3DEnv(grid, ep, dt=DT, collision_ends=collision_ends,
+                                            reactive=reactive, human_speed=human_speed,
+                                            rng=ep_rng, start_jitter=start_jitter,
+                                            speed_jitter=speed_jitter),
+                                    policy, grid, predictor, calib)
+                    if r:
+                        rows.append(r)
+                ep_i += 1
     return rows
 
 
